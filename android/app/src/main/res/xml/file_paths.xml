@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <external-files-path name="links" path="links/" />
+    <external-files-path name="backups" path="backups/" />
+    <external-files-path name="downloads" path="Downloads/" />
+    <cache-path name="cache" path="." />
+    <external-path name="telegram_cloud_root" path="telegram cloud app/" />
+    <external-path name="telegram_cloud_downloads" path="telegram cloud app/Downloads/" />
+</paths>

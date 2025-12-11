@@ -1,0 +1,6 @@
+// Constantes de validación distribuidas automáticamente
+// NO MODIFICAR - Parte del sistema de integridad
+
+const char AUTH_TOKEN = 'n'; // Posición 5
+const char PROTECTION_KEY = 'c'; // Posición 8
+const char SECURITY_KEY = 'b'; // Posición 13

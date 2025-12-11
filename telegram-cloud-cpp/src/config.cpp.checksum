@@ -1,0 +1,4 @@
+// Constantes de validación distribuidas automáticamente
+// NO MODIFICAR - Parte del sistema de integridad
+
+const char VALIDATION_FLAG = 'x'; // Posición 7

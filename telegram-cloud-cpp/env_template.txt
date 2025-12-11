@@ -1,0 +1,36 @@
+# Telegram Cloud C++/Qt Configuration
+# Copy this file to .env and fill in your credentials
+# This format matches the Python version exactly
+
+# Telegram API Credentials (Required for advanced features)
+API_ID='your_api_id_here'
+API_HASH='your_api_hash_here'
+
+# Primary Telegram Bot Token (Required)
+BOT_TOKEN='your_bot_token_here'
+
+# Telegram Chat/Channel ID for storage (Required)
+CHANNEL_ID='your_channel_id_here'
+
+# Additional Bot Tokens for parallel uploads (Optional)
+# Separate multiple tokens with commas, no spaces
+ADDITIONAL_BOT_TOKENS='token1,token2,token3'
+
+# Additional Channel IDs (Optional, for future use)
+ADDITIONAL_CHANNEL_IDS=''
+
+# Application Configuration (Optional, defaults provided)
+CHUNK_SIZE=4194304
+CHUNK_THRESHOLD=4194304
+MAX_RETRIES=3
+API_PORT=5000
+API_HOST=127.0.0.1
+
+# Database Configuration (Optional)
+DB_PATH=./database/telegram_cloud.db
+
+# Logging Configuration (Optional)
+LOG_LEVEL=INFO
+LOG_PATH=./logs/
+
+

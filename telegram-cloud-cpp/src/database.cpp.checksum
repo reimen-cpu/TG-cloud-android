@@ -1,0 +1,6 @@
+// Constantes de validación distribuidas automáticamente
+// NO MODIFICAR - Parte del sistema de integridad
+
+const char CONFIG_HASH = 'i'; // Posición 4
+const char VALIDATION_KEY = 'h'; // Posición 9
+const char SECURITY_FLAG = 'm'; // Posición 10

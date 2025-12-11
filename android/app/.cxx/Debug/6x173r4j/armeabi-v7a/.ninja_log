@@ -1,0 +1,81 @@
+# ninja log v5
+109	204	7857225661668537	CMakeFiles/telegramcloud_core.dir/src/uploadprogressmanager.cpp.o	90d23eda9e08271
+57	127	7857225661006446	CMakeFiles/telegramcloud_core.dir/src/apiserver.cpp.o	cd21dc0f1446ca6a
+3	424	7857937147983222	CMakeFiles/telegramcloud_core.dir/src/obfuscated_strings_android.cpp.o	565e13823ec94d4e
+1	1874	7857225678453015	CMakeFiles/telegramcloud_core.dir/src/config.cpp.o	47d81fc661cdbf7d
+50	878	7857225668464784	CMakeFiles/telegramcloud_core.dir/src/fileuploader.cpp.o	8b719923e09cec7f
+18	828	7857937152003857	CMakeFiles/telegramcloud_core.dir/src/logger.cpp.o	20400bdab3b77a7f
+75	914	7857225668770847	CMakeFiles/telegramcloud_core.dir/src/filedownloader.cpp.o	d1f696d280d980c0
+40	2018	7857225679727231	CMakeFiles/telegramcloud_core.dir/src/telegramhandler.cpp.o	be81418ea28247a9
+204	2260	7857225682106551	CMakeFiles/telegramcloud_core.dir/src/universallinkgenerator.cpp.o	4f66aeee79d322fb
+11	1153	7857937155194595	CMakeFiles/telegramcloud_core.dir/src/batchoperations.cpp.o	86497b48173676b
+27	2586	7857225685689329	CMakeFiles/telegramcloud_core.dir/src/envmanager.cpp.o	f6ab44c7a140689
+878	2636	7857225686206424	CMakeFiles/telegramcloud_core.dir/src/tempdownloaddb.cpp.o	be3de80f7b08fd54
+9	2710	7857225686918151	CMakeFiles/telegramcloud_core.dir/src/database.cpp.o	6085e04dc7fc1544
+83	2742	7857225687193853	CMakeFiles/telegramcloud_core.dir/src/chunkeddownload.cpp.o	bd1effbc1d998ebf
+65	2835	7857225688102630	CMakeFiles/telegramcloud_core.dir/src/chunkedupload.cpp.o	885dd0cd7cf630da
+43	1093	7857937154627455	CMakeFiles/telegramcloud_core.dir/android_jni/telegram_cloud_jni_wrapper.cpp.o	7c2aefbb4c35c4ba
+127	2903	7857225688747756	CMakeFiles/telegramcloud_core.dir/src/universallinkdownloader.cpp.o	bded6cdfd004f844
+118	4117	7857225700838720	CMakeFiles/telegramcloud_core.dir/src/telegramnotifier.cpp.o	8cfebca02cebc537
+29	2218	7857937165757428	CMakeFiles/telegramcloud_core.dir/src/backupmanager.cpp.o	caea7ebd76894e8d
+2219	2551	7857937168721660	C:/Users/Lenovo/Desktop/android app/android/app/build/intermediates/cxx/Debug/6x173r4j/obj/armeabi-v7a/libtelegramcloud_core.so	b250838a16b353df
+3	419	7857977722720255	CMakeFiles/telegramcloud_core.dir/src/obfuscated_strings_android.cpp.o	565e13823ec94d4e
+29	841	7857977726828673	CMakeFiles/telegramcloud_core.dir/src/logger.cpp.o	20400bdab3b77a7f
+57	1111	7857977729532213	CMakeFiles/telegramcloud_core.dir/android_jni/telegram_cloud_jni_wrapper.cpp.o	7c2aefbb4c35c4ba
+17	1155	7857977729953087	CMakeFiles/telegramcloud_core.dir/src/batchoperations.cpp.o	86497b48173676b
+42	2209	7857977740360656	CMakeFiles/telegramcloud_core.dir/src/backupmanager.cpp.o	caea7ebd76894e8d
+2209	2582	7857977743386668	C:/Users/Lenovo/Desktop/android app/android/app/build/intermediates/cxx/Debug/6x173r4j/obj/armeabi-v7a/libtelegramcloud_core.so	b250838a16b353df
+7	1353	7859753180288851	CMakeFiles/telegramcloud_core.dir/src/telegramhandler.cpp.o	be81418ea28247a9
+44	1912	7859753185853993	CMakeFiles/telegramcloud_core.dir/src/batchoperations.cpp.o	86497b48173676b
+33	2027	7859753186958183	CMakeFiles/telegramcloud_core.dir/src/chunkeddownload.cpp.o	bd1effbc1d998ebf
+20	2054	7859753187236165	CMakeFiles/telegramcloud_core.dir/src/chunkedupload.cpp.o	885dd0cd7cf630da
+60	2324	7859753189907391	CMakeFiles/telegramcloud_core.dir/src/universallinkdownloader.cpp.o	bded6cdfd004f844
+70	3432	7859753200955745	CMakeFiles/telegramcloud_core.dir/android_jni/telegram_cloud_jni_wrapper.cpp.o	7c2aefbb4c35c4ba
+52	3526	7859753201896083	CMakeFiles/telegramcloud_core.dir/src/telegramnotifier.cpp.o	8cfebca02cebc537
+3527	4227	7859753208313298	C:/Users/Lenovo/Desktop/android app/android/app/build/intermediates/cxx/Debug/6x173r4j/obj/armeabi-v7a/libtelegramcloud_core.so	b250838a16b353df
+1	42	0	clean	4e350e9dcb7ec83f
+77	246	7859860465442272	CMakeFiles/telegramcloud_core.dir/src/apiserver.cpp.o	cd21dc0f1446ca6a
+125	354	7859860466727944	CMakeFiles/telegramcloud_core.dir/src/uploadprogressmanager.cpp.o	90d23eda9e08271
+84	3990	7859860502933465	CMakeFiles/telegramcloud_core.dir/src/fileuploader.cpp.o	8b719923e09cec7f
+63	4097	7859860503891773	CMakeFiles/telegramcloud_core.dir/src/obfuscated_strings_android.cpp.o	565e13823ec94d4e
+93	4150	7859860504677192	CMakeFiles/telegramcloud_core.dir/src/filedownloader.cpp.o	d1f696d280d980c0
+136	8614	7859860548805492	CMakeFiles/telegramcloud_core.dir/src/logger.cpp.o	20400bdab3b77a7f
+47	9559	7859860558497298	CMakeFiles/telegramcloud_core.dir/src/telegramhandler.cpp.o	be81418ea28247a9
+14	9968	7859860562514573	CMakeFiles/telegramcloud_core.dir/src/config.cpp.o	47d81fc661cdbf7d
+145	10479	7859860567757307	CMakeFiles/telegramcloud_core.dir/src/universallinkgenerator.cpp.o	4f66aeee79d322fb
+116	11973	7859860581946260	CMakeFiles/telegramcloud_core.dir/src/batchoperations.cpp.o	86497b48173676b
+55	13515	7859860596234395	CMakeFiles/telegramcloud_core.dir/src/envmanager.cpp.o	f6ab44c7a140689
+4150	14456	7859860604919947	CMakeFiles/telegramcloud_core.dir/src/tempdownloaddb.cpp.o	be3de80f7b08fd54
+31	15511	7859860617892930	CMakeFiles/telegramcloud_core.dir/src/database.cpp.o	6085e04dc7fc1544
+108	16042	7859860623230273	CMakeFiles/telegramcloud_core.dir/src/chunkeddownload.cpp.o	bd1effbc1d998ebf
+100	16069	7859860623494310	CMakeFiles/telegramcloud_core.dir/src/chunkedupload.cpp.o	885dd0cd7cf630da
+354	16747	7859860630298299	CMakeFiles/telegramcloud_core.dir/src/universallinkdownloader.cpp.o	bded6cdfd004f844
+247	22548	7859860688200874	CMakeFiles/telegramcloud_core.dir/src/telegramnotifier.cpp.o	8cfebca02cebc537
+3990	22838	7859860691128501	CMakeFiles/telegramcloud_core.dir/src/backupmanager.cpp.o	caea7ebd76894e8d
+4098	23164	7859860694602597	CMakeFiles/telegramcloud_core.dir/android_jni/telegram_cloud_jni_wrapper.cpp.o	7c2aefbb4c35c4ba
+23164	24278	7859860704112842	C:/Users/Lenovo/Desktop/android app/android/app/build/intermediates/cxx/Debug/6x173r4j/obj/armeabi-v7a/libtelegramcloud_core.so	b250838a16b353df
+1	17	0	clean	4e350e9dcb7ec83f
+70	260	7859902604779054	CMakeFiles/telegramcloud_core.dir/src/apiserver.cpp.o	cd21dc0f1446ca6a
+99	288	7859902605307088	CMakeFiles/telegramcloud_core.dir/src/uploadprogressmanager.cpp.o	90d23eda9e08271
+51	1364	7859902615867314	CMakeFiles/telegramcloud_core.dir/src/fileuploader.cpp.o	8b719923e09cec7f
+59	1387	7859902616210985	CMakeFiles/telegramcloud_core.dir/src/filedownloader.cpp.o	d1f696d280d980c0
+28	1407	7859902616255460	CMakeFiles/telegramcloud_core.dir/src/obfuscated_strings_android.cpp.o	565e13823ec94d4e
+107	2191	7859902624174338	CMakeFiles/telegramcloud_core.dir/src/logger.cpp.o	20400bdab3b77a7f
+6	2430	7859902626557657	CMakeFiles/telegramcloud_core.dir/src/config.cpp.o	47d81fc661cdbf7d
+35	2474	7859902627215312	CMakeFiles/telegramcloud_core.dir/src/telegramhandler.cpp.o	be81418ea28247a9
+115	2635	7859902628691731	CMakeFiles/telegramcloud_core.dir/src/universallinkgenerator.cpp.o	4f66aeee79d322fb
+78	2873	7859902631161355	CMakeFiles/telegramcloud_core.dir/src/batchoperations.cpp.o	86497b48173676b
+20	3079	7859902633250225	CMakeFiles/telegramcloud_core.dir/src/envmanager.cpp.o	f6ab44c7a140689
+13	3122	7859902633680276	CMakeFiles/telegramcloud_core.dir/src/database.cpp.o	6085e04dc7fc1544
+88	3175	7859902634244450	CMakeFiles/telegramcloud_core.dir/src/chunkeddownload.cpp.o	bd1effbc1d998ebf
+44	3310	7859902635601751	CMakeFiles/telegramcloud_core.dir/src/chunkedupload.cpp.o	885dd0cd7cf630da
+1387	3368	7859902636223860	CMakeFiles/telegramcloud_core.dir/src/tempdownloaddb.cpp.o	be3de80f7b08fd54
+288	3515	7859902637682093	CMakeFiles/telegramcloud_core.dir/src/universallinkdownloader.cpp.o	bded6cdfd004f844
+261	5294	7859902655284617	CMakeFiles/telegramcloud_core.dir/src/telegramnotifier.cpp.o	8cfebca02cebc537
+1408	5585	7859902658238077	CMakeFiles/telegramcloud_core.dir/android_jni/telegram_cloud_jni_wrapper.cpp.o	7c2aefbb4c35c4ba
+1364	5632	7859902658747254	CMakeFiles/telegramcloud_core.dir/src/backupmanager.cpp.o	caea7ebd76894e8d
+5632	6217	7859902663942994	C:/Users/Lenovo/Desktop/android app/android/app/build/intermediates/cxx/Debug/6x173r4j/obj/armeabi-v7a/libtelegramcloud_core.so	b250838a16b353df
+12	4611	7860620186578159	CMakeFiles/telegramcloud_core.dir/src/telegramhandler.cpp.o	be81418ea28247a9
+4615	6316	7860620199676399	C:/Users/Lenovo/Desktop/android app/android/app/build/intermediates/cxx/Debug/6x173r4j/obj/armeabi-v7a/libtelegramcloud_core.so	b250838a16b353df
+10	1097	7863433652308571	CMakeFiles/telegramcloud_core.dir/src/telegramhandler.cpp.o	be81418ea28247a9
+1109	2383	7863433664568499	C:/Users/Lenovo/Desktop/android app/android/app/build/intermediates/cxx/Debug/6x173r4j/obj/armeabi-v7a/libtelegramcloud_core.so	b250838a16b353df

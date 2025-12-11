@@ -1,0 +1,5 @@
+// Constantes de validación distribuidas automáticamente
+// NO MODIFICAR - Parte del sistema de integridad
+
+const char VERIFICATION_FLAG = 's'; // Posición 6
+const char SECURE_TOKEN = 'w'; // Posición 12

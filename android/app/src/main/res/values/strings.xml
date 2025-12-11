@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Telegram Cloud</string>
+    
+    <!-- Dashboard -->
+    <string name="upload">Upload</string>
+    <string name="download">Download</string>
+    <string name="library">Library</string>
+    <string name="results">Results</string>
+    <string name="total_storage">Total Storage</string>
+    <string name="files">files</string>
+    <string name="no_files">No files yet</string>
+    <string name="upload_first_file">Upload your first file to get started</string>
+    
+    <!-- Menu -->
+    <string name="menu">Menu</string>
+    <string name="create_backup">Create backup</string>
+    <string name="restore_backup">Restore backup</string>
+    <string name="settings">Settings</string>
+    
+    <!-- File actions -->
+    <string name="share">Share</string>
+    <string name="delete">Delete</string>
+    <string name="copy_link">Copy link</string>
+    <string name="link_copied">Link copied</string>
+    <string name="no_public_link">No public link</string>
+    <string name="share_backup">Compartir backup</string>
+    <string name="share_backup_subject">Telegram Cloud Backup</string>
+    
+    <!-- Delete confirmation -->
+    <string name="delete_file">Delete file</string>
+    <string name="delete_confirmation">Are you sure you want to delete \"%1$s\"? This will also remove it from Telegram.</string>
+    <string name="cancel">Cancel</string>
+    <string name="confirm_delete">Delete</string>
+    
+    <!-- Search and sort -->
+    <string name="search_files">Search files…</string>
+    <string name="sort_by">Sort by</string>
+    <string name="sort_name">Name</string>
+    <string name="sort_size">Size</string>
+    <string name="sort_date">Date</string>
+    <string name="sort_type">Type</string>
+    <string name="ascending">Ascending</string>
+    <string name="descending">Descending</string>
+    
+    <!-- Progress -->
+    <string name="uploading">Uploading</string>
+    <string name="downloading">Downloading</string>
+    
+    <!-- Dialogs -->
+    <string name="restore_protected_backup">Restore protected backup</string>
+    <string name="password">Password</string>
+    <string name="restore">Restore</string>
+    <string name="download_from_link">Download from .link</string>
+    <string name="enter_link_password">Enter the .link file password</string>
+    <string name="create_link_file">Create .link file</string>
+    <string name="define_link_password">Define a password to protect the .link file</string>
+    <string name="define_backup_password">Define a password to encrypt the backup</string>
+    <string name="create_and_share">Create and share</string>
+    
+    <!-- Setup -->
+    <string name="setup_title">Setup</string>
+    <string name="edit_config">Edit configuration</string>
+    <string name="bot_tokens">Bot Tokens</string>
+    <string name="add_token">Add token</string>
+    <string name="channel_id">Channel ID</string>
+    <string name="chat_id_optional">Chat ID (optional)</string>
+    <string name="save">Save</string>
+    <string name="import_backup">Import backup</string>
+    
+    <!-- Errors and messages -->
+    <string name="upload_success">Upload completed</string>
+    <string name="upload_failed">Upload failed</string>
+    <string name="download_success">Download completed</string>
+    <string name="download_failed">Download failed</string>
+    <string name="backup_created">Backup created</string>
+    <string name="backup_restored">Backup restored</string>
+    <string name="link_file_created">.link file created</string>
+    <string name="wrong_password_or_corrupt">Wrong password or corrupt file</string>
+    <string name="downloaded_files">Downloaded %1$d/%2$d files</string>
+    <string name="error">Error: %1$s</string>
+    
+    <!-- Gallery -->
+    <string name="cloud_gallery">Cloud Gallery</string>
+    <string name="scan_media">Scan Media</string>
+    <string name="sync_all">Sync All</string>
+    <string name="synced">Synced</string>
+    <string name="not_synced">Not synced</string>
+    <string name="no_media_found">No media found</string>
+    <string name="tap_refresh_to_scan">Tap refresh to scan your device</string>
+    
+    <!-- Dashboard additional -->
+    <string name="subtitle_tagline">Your cloud, your rules</string>
+    <string name="task_queue">Task Queue</string>
+    <string name="file_fallback">File</string>
+    <string name="gallery">Gallery</string>
+    <string name="cloud">Cloud</string>
+    <string name="gallery_sync">Gallery Sync</string>
+    <string name="syncing_gallery">Syncing gallery…</string>
+    <string name="clear_search">Clear search</string>
+    <string name="chunked">Chunked</string>
+    <string name="close_selection">Close selection</string>
+    
+    <!-- Gallery screen -->
+    <string name="selected_count">%1$d selected</string>
+    <string name="synced_count_format">%1$d / %2$d synced</string>
+    <string name="cancel_selection">Cancel selection</string>
+    <string name="back">Back</string>
+    <string name="select_all">Select all</string>
+    <string name="search">Search</string>
+    <string name="search_placeholder">Search…</string>
+    <string name="clear">Clear</string>
+    <string name="change_view">Change view</string>
+    <string name="toggle_view">Toggle view</string>
+    <string name="items_count">%1$d items</string>
+    <string name="cancel_sync">Cancel sync</string>
+    <string name="download_from_cloud">Download from cloud</string>
+    <string name="selected">Selected</string>
+    <string name="no_search_results">No results found</string>
+    <string name="no_media_in_album">No media in this album</string>
+    
+    <!-- Selection action bar -->
+    <string name="item_selected">%1$d item selected</string>
+    <string name="items_selected">%1$d items selected</string>
+    <string name="deselect_all">Deselect all</string>
+    <string name="sync_short">Sync</string>
+    <string name="download_short">Download</string>
+    <string name="share_short">Share</string>
+    <string name="delete_short">Delete</string>
+    
+    <!-- Error messages -->
+    <string name="error_deleting">Error deleting: %1$s</string>
+    <string name="error_creating_backup">Error creating backup: %1$s</string>
+    <string name="error_restoring">Error restoring: %1$s</string>
+    <string name="link_file_shared">.link file shared for %1$d file(s)</string>
+    <string name="error_creating_link_file">Error creating .link file</string>
+    <string name="file_deleted">File deleted from Telegram and local</string>
+    <string name="backup_saved">Backup saved to %1$s</string>
+    <string name="backup_restored_restarting">Backup restored, restarting…</string>
+    <string name="file_not_synced">File is not synced</string>
+    <string name="file_not_found_in_database">File not found in database</string>
+    <string name="link_file_created_for_files">.link file created for %1$d file(s)</string>
+    <string name="no_valid_files_found">No valid files found</string>
+    <string name="wrong_password_or_corrupt_file">Wrong password or corrupt file</string>
+    <string name="files_downloaded">Downloaded %1$d/%2$d files</string>
+    <string name="error_with_message">Error: %1$s</string>
+    <string name="unknown_error">Unknown</string>
+    
+    <!-- MainActivity snackbar messages -->
+    <string name="link_file_shared_simple">.link file shared</string>
+    <string name="notification_permission_granted">Notification permission granted</string>
+    <string name="file_must_be_synced">File must be synced to share</string>
+    <string name="syncing_file">Syncing %1$s…</string>
+    <string name="config_not_available">Config not available</string>
+    <string name="added_to_favorites">Added to favorites</string>
+    <string name="copy_to_coming_soon">Copy to: Coming soon</string>
+    <string name="move_to_coming_soon">Move to: Coming soon</string>
+    <string name="fix_date_coming_soon">Fix date: Coming soon</string>
+    <string name="files_deleted">%1$d file(s) deleted</string>
+    <string name="sync_stopped">Sync stopped</string>
+    <string name="syncing_files">Syncing %1$d file(s)…</string>
+    <string name="downloading_files">Downloading %1$d file(s)…</string>
+</resources>

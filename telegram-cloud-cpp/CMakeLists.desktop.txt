@@ -1,0 +1,200 @@
+cmake_minimum_required(VERSION 3.16)
+project(TelegramCloud VERSION 1.0.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# If building for Android, delegate to the Android-specific CMakeLists
+if(CMAKE_SYSTEM_NAME STREQUAL "Android")
+    message(STATUS "Android build detected: including CMakeLists.android.txt and exiting main CMakeLists")
+    include(${CMAKE_SOURCE_DIR}/CMakeLists.android.txt)
+    return()
+endif()
+
+# Force static linking
+set(CMAKE_FIND_LIBRARY_SUFFIXES .lib .a)
+set(BUILD_SHARED_LIBS OFF)
+# Logging control
+option(ENABLE_LOGS "Habilitar logs en runtime" OFF)
+
+# Desactivar logs por defecto en Release si no se habilitan explícitamente
+if(CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT ENABLE_LOGS)
+    add_compile_definitions(TELEGRAM_CLOUD_DISABLE_LOGS)
+endif()
+
+
+# OLLVM Obfuscation flags
+option(ENABLE_OLLVM "Enable OLLVM obfuscation" OFF)
+if(ENABLE_OLLVM)
+    set(OLLVM_PATH "C:/Program Files/OLLVM")
+    if(EXISTS "${OLLVM_PATH}")
+        set(CMAKE_CXX_COMPILER "${OLLVM_PATH}/bin/clang++.exe")
+        set(CMAKE_C_COMPILER "${OLLVM_PATH}/bin/clang.exe")
+        # OLLVM obfuscation flags
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -mllvm -fla -mllvm -sub -mllvm -sobf -mllvm -bcf")
+        set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -mllvm -fla -mllvm -sub -mllvm -sobf -mllvm -bcf")
+        message(STATUS "OLLVM obfuscation enabled")
+    else()
+        message(WARNING "OLLVM not found at ${OLLVM_PATH}. Disabling obfuscation.")
+        set(ENABLE_OLLVM OFF)
+    endif()
+endif()
+
+# Force static runtime
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /MT")
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /MTd")
+
+# Find wxWidgets with static linking
+set(wxWidgets_USE_STATIC ON)
+set(wxWidgets_USE_UNICODE ON)
+if(DEFINED ENV{VCPKG_ROOT})
+    set(wxWidgets_ROOT_DIR "$ENV{VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}")
+elseif(DEFINED VCPKG_INSTALLED_DIR)
+    set(wxWidgets_ROOT_DIR "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
+endif()
+find_package(wxWidgets REQUIRED COMPONENTS core base net)
+
+# Find SQLCipher with static linking
+find_package(sqlcipher CONFIG REQUIRED)
+
+# Find CURL with static linking
+find_package(CURL REQUIRED)
+set(CURL_USE_STATIC ON)
+
+# Find OpenSSL with static linking
+find_package(OpenSSL REQUIRED)
+set(OPENSSL_USE_STATIC_LIBS ON)
+
+# Include directories
+include_directories(
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/../ADVobfuscator/include
+    ${CMAKE_SOURCE_DIR}/third_party/httplib
+    ${CMAKE_SOURCE_DIR}/third_party/json/include
+    ${wxWidgets_INCLUDE_DIRS}
+    ${CURL_INCLUDE_DIRS}
+    ${OPENSSL_INCLUDE_DIR}
+)
+
+# Add wxWidgets compile definitions
+include(${wxWidgets_USE_FILE})
+
+# Add UNICODE definitions properly
+add_definitions(-DUNICODE -D_UNICODE)
+
+# Source files
+set(SOURCES
+    src/main.cpp
+    src/mainwindow.cpp
+    src/helpdialog.cpp
+    src/config.cpp
+    src/database.cpp
+    src/envmanager.cpp
+    src/obfuscated_strings.cpp
+    src/telegramhandler.cpp
+    src/apiserver.cpp
+    src/fileuploader.cpp
+    src/filedownloader.cpp
+    src/chunkedupload.cpp
+    src/chunkeddownload.cpp
+    src/batchoperations.cpp
+    src/uploadprogressmanager.cpp
+    src/logger.cpp
+    src/universallinkgenerator.cpp
+    src/universallinkdownloader.cpp
+    src/telegramnotifier.cpp
+    src/backupmanager.cpp
+)
+
+# Resources
+set(RESOURCES
+    resources/app.rc
+)
+
+# Header files
+set(HEADERS
+    include/mainwindow.h
+    include/helpdialog.h
+    include/config.h
+    include/database.h
+    include/telegramhandler.h
+    include/apiserver.h
+    include/fileuploader.h
+    include/filedownloader.h
+    include/chunkedupload.h
+    include/uploadprogressmanager.h
+    include/logger.h
+    include/universallinkgenerator.h
+    include/universallinkdownloader.h
+    include/telegramnotifier.h
+    include/backupmanager.h
+)
+
+# Create executable
+if(WIN32)
+    add_executable(${PROJECT_NAME} WIN32 ${SOURCES} ${HEADERS} ${RESOURCES})
+else()
+    add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
+endif()
+
+# Link libraries
+target_link_libraries(${PROJECT_NAME}
+    ${wxWidgets_LIBRARIES}
+    sqlcipher::sqlcipher
+    CURL::libcurl
+    OpenSSL::SSL
+    OpenSSL::Crypto
+)
+
+# Platform-specific settings
+if(WIN32)
+    target_link_libraries(${PROJECT_NAME} 
+        ws2_32
+        winmm
+        comctl32
+        rpcrt4
+        ole32
+        oleaut32
+        uuid
+        advapi32
+        shell32
+        user32
+        gdi32
+        comdlg32
+        winspool
+        imm32
+        oleacc
+        uxtheme
+        dwmapi
+    )
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        WIN32_EXECUTABLE TRUE
+    )
+    
+    # Embed icon resource
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/resources/icon.png
+        $<TARGET_FILE_DIR:${PROJECT_NAME}>/icon.png
+    )
+endif()
+
+if(UNIX AND NOT APPLE)
+    target_link_libraries(${PROJECT_NAME} pthread dl)
+endif()
+
+# Installation
+install(TARGETS ${PROJECT_NAME}
+    BUNDLE DESTINATION .
+    RUNTIME DESTINATION bin
+)
+
+# Copy .env template on build
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    ${CMAKE_SOURCE_DIR}/env_template.txt
+    $<TARGET_FILE_DIR:${PROJECT_NAME}>/env_template.txt
+)
+

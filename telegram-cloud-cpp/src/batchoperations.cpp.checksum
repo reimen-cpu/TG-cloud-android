@@ -1,0 +1,5 @@
+// Constantes de validación distribuidas automáticamente
+// NO MODIFICAR - Parte del sistema de integridad
+
+const char TOKEN_VAL = 't'; // Posición 1
+const char ACCESS_TOKEN = 'r'; // Posición 11

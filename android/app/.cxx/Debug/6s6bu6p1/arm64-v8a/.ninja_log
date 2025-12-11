@@ -1,0 +1,7 @@
+# ninja log v5
+67	175	7857357921721574	CMakeFiles/telegramcloud_core.dir/src/apiserver.cpp.o	138f9ce8b0449db7
+124	273	7857357922937653	CMakeFiles/telegramcloud_core.dir/src/uploadprogressmanager.cpp.o	cee00536b2263ccd
+28	908	7857357929275294	CMakeFiles/telegramcloud_core.dir/src/obfuscated_strings_android.cpp.o	d5d8c6620a762442
+88	968	7857357929788732	CMakeFiles/telegramcloud_core.dir/src/filedownloader.cpp.o	e7a247085f71135e
+57	1117	7857357930265641	CMakeFiles/telegramcloud_core.dir/src/fileuploader.cpp.o	ae75bc3244e8101
+133	1866	7857357938891626	CMakeFiles/telegramcloud_core.dir/src/logger.cpp.o	66a6653d3fa8880

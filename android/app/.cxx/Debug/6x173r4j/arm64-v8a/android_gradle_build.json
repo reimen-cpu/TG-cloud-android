@@ -1,0 +1,38 @@
+{
+  "buildFiles": [
+    "C:\\Users\\Lenovo\\Desktop\\android app\\telegram-cloud-cpp\\CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "C:\\Android\\cmake\\3.22.1\\bin\\ninja.exe",
+      "-C",
+      "C:\\Users\\Lenovo\\Desktop\\android app\\android\\app\\.cxx\\Debug\\6x173r4j\\arm64-v8a",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "C:\\Android\\cmake\\3.22.1\\bin\\ninja.exe",
+    "-C",
+    "C:\\Users\\Lenovo\\Desktop\\android app\\android\\app\\.cxx\\Debug\\6x173r4j\\arm64-v8a",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {
+    "telegramcloud_core::@6890427a1f51a3e7e1df": {
+      "toolchain": "toolchain",
+      "abi": "arm64-v8a",
+      "artifactName": "telegramcloud_core",
+      "output": "C:\\Users\\Lenovo\\Desktop\\android app\\android\\app\\build\\intermediates\\cxx\\Debug\\6x173r4j\\obj\\arm64-v8a\\libtelegramcloud_core.so",
+      "runtimeFiles": []
+    }
+  },
+  "toolchains": {
+    "toolchain": {
+      "cCompilerExecutable": "C:\\Android\\ndk\\25.2.9519653\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\clang.exe",
+      "cppCompilerExecutable": "C:\\Android\\ndk\\25.2.9519653\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\clang++.exe"
+    }
+  },
+  "cFileExtensions": [],
+  "cppFileExtensions": [
+    "cpp"
+  ]
+}

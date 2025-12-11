@@ -1,0 +1,62 @@
+# Build directories
+build/
+build-*/
+*.pro.user
+*.pro.user.*
+
+# Qt generated files
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+Makefile
+*.o
+*.obj
+
+# Executables
+TelegramCloud
+TelegramCloud.exe
+*.app
+
+# Configuration (sensitive files)
+config.ini
+.env
+
+# Keep templates
+!env_template.txt
+!env_example.txt
+
+# Database
+database/*.db
+database/*.db-journal
+
+# Logs
+logs/*.log
+
+# IDE files
+.vscode/
+.idea/
+*.user
+*.suo
+*.sdf
+*.opensdf
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+
+# Qt Creator
+*.autosave
+
+# Backup files
+*~
+*.bak
+*.swp
+
