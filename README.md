@@ -12,9 +12,6 @@ Markdown
 
 # Telegram Cloud Android
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Android](https://img.shields.io/badge/Android-9.0%2B-green.svg)](https://www.android.com/)
-
 Aplicación Android para gestionar archivos en la nube usando Telegram como backend. **Tu nube, tus reglas.**
 
 ## 🚀 Características Principales
