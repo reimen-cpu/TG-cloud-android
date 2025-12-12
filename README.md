@@ -1,6 +1,3 @@
-code
-Markdown
-
 <div style="display: flex; gap: 10px;">
 
   <img src="android/img/photo_2025-12-11_22-23-07.jpg" width="300">
@@ -14,72 +11,72 @@ Markdown
 
 [![F-Droid](https://img.shields.io/f-droid/v/com.telegram.cloud.svg)](https://f-droid.org/packages/com.telegram.cloud/)
 
-Aplicación Android para gestionar archivos en la nube usando Telegram como backend. **Tu nube, tus reglas.**
+Android application to manage files in the cloud using Telegram as a backend. **Your cloud, your rules.**
 
-## 🚀 Características Principales
+## 🚀 Main Features
 
-### Sin Límites de Tamaño ni Almacenamiento
+### No Size or Storage Limits
 
-**⚠️ IMPORTANTE: Esta aplicación NO tiene límites de tamaño de archivo ni de almacenamiento.**
+**⚠️ IMPORTANT: This application has NO file size or storage limits.**
 
-- **Archivos grandes**: Utiliza subida por fragmentos (chunked upload) de 4MB para archivos de cualquier tamaño.
-- **Almacenamiento ilimitado**: Telegram no impone límites prácticos de almacenamiento.
-- **Múltiples bots**: Soporte para múltiples tokens de bot para mayor velocidad.
-- **Subida paralela**: Los fragmentos se suben simultáneamente.
+- **Large files**: Uses chunked upload (4MB) for files of any size.
+- **Unlimited storage**: Telegram imposes no practical storage limits.
+- **Multiple bots**: Support for multiple bot tokens for higher speed.
+- **Parallel upload**: Chunks are uploaded simultaneously.
 
-### Funcionalidades
+### Functionalities
 
-- 📤 **Subida y descarga** nativa.
-- 🖼️ **Galería de medios** con sincronización automática.
-- 🔐 **Backups cifrados** y base de datos segura (SQLCipher).
-- 🔗 **Archivos .link** para compartir contenido protegido.
-- 📱 **Interfaz Material Design 3** (Jetpack Compose).
-- 🎬 **Reproductor de video** integrado (ExoPlayer).
+- 📤 **Native upload and download**.
+- 🖼️ **Media gallery** with automatic synchronization.
+- 🔐 **Encrypted backups** and secure database (SQLCipher).
+- 🔗 **.link files** for sharing protected content.
+- 📱 **Material Design 3 Interface** (Jetpack Compose).
+- 🎬 **Integrated video player** (ExoPlayer).
 
-## 📋 Requisitos
+## 📋 Requirements
 
-- **Android 9.0 (API 28)** o superior.
-- **Bot de Telegram** (Token obtenido de @BotFather).
-- **Conexión a Internet**.
+- **Android 9.0 (API 28)** or higher.
+- **Telegram Bot** (Token obtained from @BotFather).
+- **Internet Connection**.
 
-### Para Compilar desde Código Fuente
+### To Build from Source Code
 
-- **Android SDK** con API 28+.
-- **Android NDK** (Versión recomendada: **r25c**).
+- **Android SDK** with API 28+.
+- **Android NDK** (Recommended version: **r25c**).
 - **CMake 3.22+**.
-- **Linux/WSL** (Ubuntu 22.04+ recomendado).
-- **Paquetes**: `git`, `wget`, `tar`, `perl`, `build-essential`, `tcl`, `dos2unix`.
+- **Linux/WSL** (Ubuntu 22.04+ recommended).
+- **Packages**: `git`, `wget`, `tar`, `perl`, `build-essential`, `tcl`, `dos2unix`.
 
-## 📦 Instalación
+## 📦 Installation
 
-### Opción 1: Instalar desde F-Droid (Recomendado)
+### Option 1: Install from F-Droid (Recommended)
 <a href="https://f-droid.org/packages/com.telegram.cloud/">
     <img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png" alt="Get it on F-Droid" height="80">
 </a>
 
-### Opción 2: Descargar APK
-Ve a la sección [Release](https://github.com/reimen-cpu/TG-cloud-android/releases/tag/V1.0.0) y descarga la última versión.
+### Option 2: Download APK
+Go to the [Release](https://github.com/reimen-cpu/TG-cloud-android/releases/tag/V1.0.0) section and download the latest version.
 
-### Opción 2: Compilación Manual
-Sigue las instrucciones a continuación.
+### Option 3: Manual Compilation
+Follow the instructions below.
 
 ---
 
-## 🔨 Guía de Compilación Manual
+## 🔨 Manual Compilation Guide
 
-Debido a la complejidad de las dependencias nativas (C++), sigue estos pasos estrictamente en orden.
+Due to the complexity of native dependencies (C++), follow these steps strictly in order.
 
-### 1. Preparar Entorno
+### 1. Prepare Environment
 
-Instala las herramientas necesarias y configura las rutas. Ajusta `ANDROID_NDK_HOME` si tu versión es diferente.
+Install the necessary tools and configure the paths. Adjust `ANDROID_NDK_HOME` if your version is different.
 
 ```bash
-# Instalar dependencias del sistema
+# Install system dependencies
 sudo apt-get update
 sudo apt-get install -y git wget tar perl build-essential tcl dos2unix
 ```
 
-# Configurar variables (Ajusta la ruta del NDK según tu instalación)
+# Configure variables (Adjust NDK path according to your installation)
 
 ```bash
 export ANDROID_HOME="$HOME/android-sdk"
@@ -87,29 +84,29 @@ export ANDROID_NDK_HOME="$HOME/android-sdk/ndk/25.2.9519653"
 export API=28
 ```
 
-2. Crear Wrapper para CMake
-Este paso es necesario para inyectar configuraciones que los scripts originales no contemplan (como rutas de OpenSSL estáticas y correcciones para Ninja).
-Copia y pega este bloque completo en tu terminal:
+### 2. Create CMake Wrapper
+This step is necessary to inject configurations that the original scripts do not contemplate (such as static OpenSSL paths and Ninja fixes).
+Copy and paste this complete block into your terminal:
 
 ```bash
 mkdir -p "$HOME/cmake-wrap"
 
 cat > "$HOME/cmake-wrap/cmake" << 'EOF'
 #!/bin/bash
-# Wrapper para corregir compilación en Android NDK
+# Wrapper to fix compilation on Android NDK
 
 for arg in "$@"; do
-  # Corregir error de Ninja: "-j" vacío -> "-jN"
+  # Fix Ninja error: "-j" empty -> "-jN"
   if [ "$arg" = "--build" ]; then
     exec /usr/bin/cmake --build . -- -j$(nproc)
   fi
-  # Corregir error de Ninja: "--config Release" no soportado
+  # Fix Ninja error: "--config Release" not supported
   if [ "$arg" = "--install" ]; then
     exec /usr/bin/cmake --install .
   fi
 done
 
-# Inyectar rutas de OpenSSL y forzar librerías estáticas
+# Inject OpenSSL paths and force static libraries
 exec /usr/bin/cmake \
   -DBUILD_SHARED_LIBS=OFF \
   -DCMAKE_INSTALL_LIBDIR=lib \
@@ -125,19 +122,19 @@ export PATH="$HOME/cmake-wrap:$PATH"
 ```
 
 
-3. Descargar y Preparar Código Fuente
-Descarga las librerías y prepara SQLCipher (que requiere un paso manual de generación de código).
+### 3. Download and Prepare Source Code
+Download the libraries and prepare SQLCipher (which requires a manual code generation step).
 
 
 ```bash
 mkdir -p $HOME/android-native-sources
 cd $HOME/android-native-sources
 
-# Descargar OpenSSL y Curl
+# Download OpenSSL and Curl
 wget https://www.openssl.org/source/openssl-3.2.0.tar.gz && tar xf openssl-3.2.0.tar.gz
 wget https://curl.se/download/curl-8.7.1.tar.gz && tar xf curl-8.7.1.tar.gz
 
-# Descargar y Preparar SQLCipher
+# Download and Prepare SQLCipher
 git clone https://github.com/sqlcipher/sqlcipher.git
 cd sqlcipher
 ./configure
@@ -146,7 +143,7 @@ make sqlite3.c
 find $HOME/android-native-sources/openssl-3.2.0 -type f -exec dos2unix {} \;
 ```
 
-Ahora creamos el archivo de configuración CMakeLists.txt que SQLCipher necesita:
+Now we create the CMakeLists.txt configuration file that SQLCipher needs:
 
 ```bash
 cat > CMakeLists.txt << 'EOF'
@@ -168,41 +165,41 @@ install(FILES sqlite3.h DESTINATION include)
 EOF
 ```
 
-4. Parchear Scripts de Compilación
-Para evitar errores en dispositivos antiguos (ARMv7), debemos desactivar el ensamblador en OpenSSL. Modificamos el script original para permitir inyección de opciones.
+### 4. Patch Build Scripts
+To avoid errors on old devices (ARMv7), we must disable the assembler in OpenSSL. We modify the original script to allow option injection.
 
 ```bash
 cd /mnt/c/Users/Lenovo/Desktop/jugar/prueba-github
 sed -i "s|./Configure|./Configure \$OPENSSL_OPTS -fPIC|g" telegram-cloud-cpp/third_party/android_build_scripts/build_openssl_android.sh
 ```
 
-5. Compilar Librerías Nativas
-Ejecuta este bloque para compilar OpenSSL, Libcurl y SQLCipher para ambas arquitecturas (arm64-v8a y armeabi-v7a).
+### 5. Compile Native Libraries
+Run this block to compile OpenSSL, Libcurl, and SQLCipher for both architectures (arm64-v8a and armeabi-v7a).
 
 ```bash
 mkdir -p $HOME/android-native-builds/{openssl,libcurl,sqlcipher}
 
 for ABI in arm64-v8a armeabi-v7a; do
-  echo ">>> Compilando para $ABI..."
+  echo ">>> Compiling for $ABI..."
   
-  # Definir opciones específicas para ARMv7
+  # Define specific options for ARMv7
   export OPENSSL_OPTS=""
   if [ "$ABI" == "armeabi-v7a" ]; then
       export OPENSSL_OPTS="no-asm"
   fi
 
-  # 1. Compilar OpenSSL
+  # 1. Compile OpenSSL
   ./telegram-cloud-cpp/third_party/android_build_scripts/build_openssl_android.sh \
     -ndk "$ANDROID_NDK_HOME" -abi "$ABI" -api "$API" \
     -srcPath "$HOME/android-native-sources/openssl-3.2.0" \
     -outDir "$HOME/android-native-builds/openssl"
 
-### Nota Importante sobre ABIs y Rutas
+### Important Note about ABIs and Paths
 
-#Los scripts originales esperan rutas con **guion alto** (`build-armeabi-v7a`), pero la #compilación de OpenSSL genera carpetas con **guion bajo** (`build_armeabi_v7a`).  
+# The original scripts expect paths with **hyphens** (`build-armeabi-v7a`), but # OpenSSL compilation generates folders with **underscores** (`build_armeabi_v7a`).
 
-#Para corregirlo automáticamente antes de compilar Libcurl o SQLCipher:
-# Renombrar carpetas OpenSSL de guion bajo a guion alto
+# To fix it automatically before compiling Libcurl or SQLCipher:
+# Rename OpenSSL folders from underscore to hyphen
 cd $HOME/android-native-builds/openssl
 
 if [ "$ABI" == "armeabi-v7a" ] && [ -d "build_armeabi_v7a" ] && [ ! -d "build-armeabi-v7a" ]; then
@@ -213,25 +210,25 @@ if [ "$ABI" == "arm64-v8a" ] && [ -d "build_arm64_v8a" ] && [ ! -d "build-arm64-
     mv build_arm64_v8a build-arm64-v8a
 fi
 
-# Actualizar variable para los scripts
+# Update variable for the scripts
 export OPENSSL_ROOT_DIR="$HOME/android-native-builds/openssl/build-$ABI/installed"
 cd -
 
-  # 2. Compilar Libcurl
+  # 2. Compile Libcurl
   ./telegram-cloud-cpp/third_party/android_build_scripts/build_libcurl_android.sh \
     -ndk "$ANDROID_NDK_HOME" -abi "$ABI" -api "$API" \
     -opensslDir "$OPENSSL_ROOT_DIR" \
     -srcPath "$HOME/android-native-sources/curl-8.7.1" \
     -outDir "$HOME/android-native-builds/libcurl"
 
-  # Mover librería si se instaló en lib64 por error
+  # Move library if it was installed in lib64 by mistake
   if [ -f "$HOME/android-native-builds/libcurl/build_${ABI}/installed/lib64/libcurl.a" ]; then
       mkdir -p "$HOME/android-native-builds/libcurl/build_${ABI}/installed/lib"
       cp "$HOME/android-native-builds/libcurl/build_${ABI}/installed/lib64/libcurl.a" \
          "$HOME/android-native-builds/libcurl/build_${ABI}/installed/lib/"
   fi
 
-  # 3. Compilar SQLCipher
+  # 3. Compile SQLCipher
   ./telegram-cloud-cpp/third_party/android_build_scripts/build_sqlcipher_android.sh \
     -ndk "$ANDROID_NDK_HOME" -abi "$ABI" -api "$API" \
     -opensslDir "$OPENSSL_ROOT_DIR" \
@@ -240,8 +237,8 @@ cd -
 done
 ```
 
-6. Generar APK
-Configura Gradle con las rutas exactas de las librerías compiladas y genera la aplicación.
+### 6. Generate APK
+Configure Gradle with the exact paths of the compiled libraries and generate the application.
 
 ```bash
 cat > local.properties <<EOF
@@ -255,38 +252,37 @@ native.sqlcipher.arm64-v8a=/home/enovo/android-native-builds/sqlcipher/build_arm
 native.sqlcipher.armeabi-v7a=/home/enovo/android-native-builds/sqlcipher/build_armeabi_v7a/installed
 EOF
 
-# Corregir formato de archivo gradlew (para WSL)
+# Fix gradlew file format (for WSL)
 dos2unix android/gradlew
 chmod +x android/gradlew
 
-# Compilar
+# Compile
 cd android
 ./gradlew assembleDebug
 ```
 
 
-La APK aparecerá en: android/app/build/outputs/apk/debug/app-debug.apk
+The APK will appear in: android/app/build/outputs/apk/debug/app-debug.apk
 
-📁 Estructura del Proyecto
+## 📁 Project Structure
 
 ```bash
 telegram-cloud-android/
-├── README.md                      # Instrucciones
-├── android/                       # Aplicación Android (Kotlin)
-├── telegram-cloud-cpp/            # Núcleo nativo (C++)
+├── README.md                      # Instructions
+├── android/                       # Android Application (Kotlin)
+├── telegram-cloud-cpp/            # Native Core (C++)
 └── scripts/                       # Scripts (Experimental)
 ```
 
-🤝 Contribuir
+## 🤝 Contribute
 
-Haz Fork del repositorio.
+Fork the repository.
 
-Crea una rama (git checkout -b feature/NuevaFeature).
-Envía un Pull Request.
+Create a branch (git checkout -b feature/NewFeature).
+Send a Pull Request.
 
-📝 Licencia
+## 📝 License
 
-GNU General Public License v3.0 - ver archivo LICENSE.
+GNU General Public License v3.0 - see LICENSE file.
 
-Tu nube, tus reglas. 🚀
-
+Your cloud, your rules. 🚀
