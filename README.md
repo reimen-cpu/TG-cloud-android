@@ -44,7 +44,7 @@ Aplicación Android para gestionar archivos en la nube usando Telegram como back
 ## 📦 Instalación
 
 ### Opción 1: Descargar APK (Recomendado)
-Ve a la sección [Releases](https://github.com/reimen-cpu/telegram-cloud-android/releases) y descarga la última versión.
+Ve a la sección [Releases]([https://github.com/reimen-cpu/telegram-cloud-android/releases](https://github.com/reimen-cpu/TG-cloud-android/releases/tag/V1.0.0)) y descarga la última versión.
 
 ### Opción 2: Compilación Manual
 Sigue las instrucciones a continuación.
