@@ -22,23 +22,24 @@ object SyncNotificationManager {
     private const val NOTIFICATION_ID_SYNC = 1001
     private const val NOTIFICATION_ID_UPLOAD = 1002
     private const val NOTIFICATION_ID_DOWNLOAD = 1003
+    private const val NOTIFICATION_ID_RESTORE = 1004
     internal const val ACTION_PAUSE = "pause_sync"
     internal const val ACTION_STOP = "stop_sync"
     internal const val EXTRA_RESUME = "sync_resume"
     internal const val EXTRA_OPERATION_TYPE = "operation_type"
     
     enum class OperationType {
-        SYNC, UPLOAD, DOWNLOAD
+        SYNC, UPLOAD, DOWNLOAD, RESTORE
     }
     
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Gallery Sync",
+                "Gallery Operations",
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
-                description = "Shows progress of gallery synchronization"
+                description = "Shows progress of gallery synchronization and restore operations"
                 setShowBadge(false)
                 enableVibration(false)
                 enableLights(false)
@@ -54,6 +55,7 @@ object SyncNotificationManager {
             OperationType.SYNC -> NOTIFICATION_ID_SYNC
             OperationType.UPLOAD -> NOTIFICATION_ID_UPLOAD
             OperationType.DOWNLOAD -> NOTIFICATION_ID_DOWNLOAD
+            OperationType.RESTORE -> NOTIFICATION_ID_RESTORE
         }
     }
     
@@ -62,6 +64,7 @@ object SyncNotificationManager {
             OperationType.SYNC -> "Gallery Sync"
             OperationType.UPLOAD -> "Uploading"
             OperationType.DOWNLOAD -> "Downloading"
+            OperationType.RESTORE -> "Restoring Gallery"
         }
         return if (isPaused) "$baseTitle (Paused)" else "$baseTitle in Progress"
     }
@@ -120,6 +123,7 @@ object SyncNotificationManager {
             OperationType.SYNC -> "Syncing: $currentFile"
             OperationType.UPLOAD -> "Uploading: $currentFile"
             OperationType.DOWNLOAD -> "Downloading: $currentFile"
+            OperationType.RESTORE -> "Restoring: $currentFile"
         }
 
         val title = getTitle(operationType, isPaused)
@@ -127,6 +131,7 @@ object SyncNotificationManager {
             OperationType.SYNC -> "Syncing $current of $total files\nCurrent: $currentFile"
             OperationType.UPLOAD -> "Uploading $current of $total files\nCurrent: $currentFile"
             OperationType.DOWNLOAD -> "Downloading $current of $total files\nCurrent: $currentFile"
+            OperationType.RESTORE -> "Restoring $current of $total files from Telegram\nCurrent: $currentFile"
         }
 
         animateIcon(context)
@@ -205,11 +210,13 @@ object SyncNotificationManager {
             OperationType.SYNC -> "Gallery Sync Completed"
             OperationType.UPLOAD -> "Upload Completed"
             OperationType.DOWNLOAD -> "Download Completed"
+            OperationType.RESTORE -> "Gallery Restore Completed"
         }
         val text = when (operationType) {
             OperationType.SYNC -> "Successfully synced $totalCompleted file(s)"
             OperationType.UPLOAD -> "Successfully uploaded $totalCompleted file(s)"
             OperationType.DOWNLOAD -> "Successfully downloaded $totalCompleted file(s)"
+            OperationType.RESTORE -> "Successfully restored $totalCompleted file(s) from Telegram"
         }
         
         animateIcon(context)
@@ -234,6 +241,7 @@ object SyncNotificationManager {
         NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID_SYNC)
         NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID_UPLOAD)
         NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID_DOWNLOAD)
+        NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID_RESTORE)
     }
 }
 

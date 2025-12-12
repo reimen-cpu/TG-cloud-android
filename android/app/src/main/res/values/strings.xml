@@ -88,6 +88,8 @@
     <string name="not_synced">Not synced</string>
     <string name="no_media_found">No media found</string>
     <string name="tap_refresh_to_scan">Tap refresh to scan your device</string>
+    <string name="restore_all">Restore All</string>
+    <string name="restoring_gallery">Restoring gallery…</string>
     
     <!-- Dashboard additional -->
     <string name="subtitle_tagline">Your cloud, your rules</string>

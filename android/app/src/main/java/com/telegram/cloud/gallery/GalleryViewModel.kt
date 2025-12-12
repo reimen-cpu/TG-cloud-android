@@ -382,12 +382,12 @@ class GalleryViewModelFactory(
     private val context: Context,
     private val mediaScanner: MediaScanner,
     private val syncManager: GallerySyncManager,
-    private val database: CloudDatabase
+    private val database: CloudDatabase,
+    private val restoreManager: GalleryRestoreManager
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(GalleryViewModel::class.java)) {
-            val restoreManager = GalleryRestoreManager(context, database, database.galleryMediaDao(), syncManager)
             return GalleryViewModel(context, mediaScanner, syncManager, database, restoreManager) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")

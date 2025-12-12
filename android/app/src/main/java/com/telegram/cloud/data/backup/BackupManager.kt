@@ -31,7 +31,8 @@ private const val ENVMANAGER_PBKDF2_ITERATIONS = 100000
 class BackupManager(
     private val context: Context,
     private val configStore: ConfigStore,
-    private val database: CloudDatabase
+    private val database: CloudDatabase,
+    private val repository: com.telegram.cloud.data.repository.TelegramRepository
 ) {
 
     private val cacheDir: File get() = File(context.cacheDir, "tgcloud")
@@ -202,6 +203,10 @@ class BackupManager(
             // Invalidate Room's cache so it picks up the migrated data
             database.invalidateAllTables()
             Log.i(TAG, "restoreBackup: Invalidated Room cache")
+            
+            // Reload files from database so they appear in the UI
+            repository.reloadFilesFromDatabase()
+            Log.i(TAG, "restoreBackup: Reloaded files from database")
             
             Log.i(TAG, "restoreBackup: Complete!")
         }
@@ -383,65 +388,7 @@ class BackupManager(
                 )
             }
             
-            // Create target (Android) database with Room schema
-            val targetConn = android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(
-                targetDb.absolutePath,
-                null
-            )
-            
-            // Create Room tables
-            targetConn.execSQL("""
-                CREATE TABLE IF NOT EXISTS cloud_files (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                    telegram_message_id INTEGER NOT NULL,
-                    file_id TEXT NOT NULL,
-                    file_unique_id TEXT,
-                    file_name TEXT NOT NULL,
-                    mime_type TEXT,
-                    size_bytes INTEGER NOT NULL,
-                    uploaded_at INTEGER NOT NULL,
-                    caption TEXT,
-                    share_link TEXT,
-                    checksum TEXT,
-                    uploader_tokens TEXT DEFAULT ''
-                )
-            """.trimIndent())
-            
-            targetConn.execSQL("""
-                CREATE TABLE IF NOT EXISTS upload_tasks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                    uri TEXT NOT NULL,
-                    display_name TEXT NOT NULL,
-                    size_bytes INTEGER NOT NULL,
-                    status TEXT NOT NULL,
-                    progress INTEGER NOT NULL,
-                    error TEXT,
-                    created_at INTEGER NOT NULL
-                )
-            """.trimIndent())
-            
-            targetConn.execSQL("""
-                CREATE TABLE IF NOT EXISTS download_tasks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                    file_id TEXT NOT NULL,
-                    target_path TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    progress INTEGER NOT NULL,
-                    error TEXT,
-                    created_at INTEGER NOT NULL
-                )
-            """.trimIndent())
-            
-            // Room metadata table
-            targetConn.execSQL("""
-                CREATE TABLE IF NOT EXISTS room_master_table (
-                    id INTEGER PRIMARY KEY,
-                    identity_hash TEXT
-                )
-            """.trimIndent())
-            targetConn.execSQL("INSERT OR REPLACE INTO room_master_table (id, identity_hash) VALUES(42, 'placeholder')")
-            
-            // Check what tables exist in source
+            // Check what tables exist in source to detect if it's Android or Desktop backup
             val tablesCursor = sourceConn.rawQuery(
                 "SELECT name FROM sqlite_master WHERE type='table'", null
             )
@@ -452,25 +399,122 @@ class BackupManager(
             tablesCursor.close()
             Log.i(TAG, "migrateDesktopDatabase: Source tables: $tables")
             
+            // Detect backup source: Android has cloud_files, Desktop has files
+            val isAndroidBackup = tables.contains("cloud_files")
+            val isDesktopBackup = tables.contains("files") || tables.contains("chunked_files")
+            
+            Log.i(TAG, "migrateDesktopDatabase: isAndroid=$isAndroidBackup, isDesktop=$isDesktopBackup")
+            
+            if (isAndroidBackup) {
+                // Android backup - just copy the database file directly
+                Log.i(TAG, "migrateDesktopDatabase: Detected Android backup, copying directly")
+                sourceConn.close()
+                
+                // Delete existing database
+                targetDb.delete()
+                File(targetDb.absolutePath + "-shm").delete()
+                File(targetDb.absolutePath + "-wal").delete()
+                
+                // Copy database file
+                sourceDb.copyTo(targetDb, overwrite = true)
+                Log.i(TAG, "migrateDesktopDatabase: Android backup copied successfully")
+                
+            } else if (isDesktopBackup) {
+                // Desktop backup - need to migrate to Android format using Room DAOs
+                Log.i(TAG, "migrateDesktopDatabase: Detected Desktop backup, migrating to Android format")
+                sourceConn.close()
+                
+                // Use the same logic as encrypted databases - use Room DAOs
+                migrateFromDesktopToAndroid(sourceDb, targetDb, channelId)
+                
+            } else {
+                // Unknown format
+                Log.e(TAG, "migrateDesktopDatabase: Unknown backup format, tables: $tables")
+                sourceConn.close()
+                throw Exception("Unknown backup format")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "migrateDesktopDatabase: Error during migration", e)
+            throw e
+        }
+    }
+    
+    /**
+     * Migrates from Desktop unencrypted database to Android Room format.
+     */
+    private suspend fun migrateFromDesktopToAndroid(
+        sourceDb: File,
+        targetDb: File,
+        channelId: String
+    ) {
+        Log.i(TAG, "migrateFromDesktopToAndroid: Starting migration")
+        
+        try {
+            // Clear existing Room data first
+            database.cloudFileDao().clear()
+            database.uploadTaskDao().clear()
+            database.downloadTaskDao().clear()
+            Log.i(TAG, "migrateFromDesktopToAndroid: Cleared existing Room data")
+            
+            // Open source database
+            val sourceConn = android.database.sqlite.SQLiteDatabase.openDatabase(
+                sourceDb.absolutePath,
+                null,
+                android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+            )
+            
+            // Check what tables exist
+            val tablesCursor = sourceConn.rawQuery(
+                "SELECT name FROM sqlite_master WHERE type='table'", null
+            )
+            val tables = mutableListOf<String>()
+            while (tablesCursor.moveToNext()) {
+                tables.add(tablesCursor.getString(0))
+            }
+            tablesCursor.close()
+            Log.i(TAG, "migrateFromDesktopToAndroid: Source tables: $tables")
+            
             var migratedCount = 0
+            
+            // Get list of chunked file names to exclude from 'files' table
+            val chunkedFileNames = mutableSetOf<String>()
+            if (tables.contains("chunked_files")) {
+                val chunkedCursor = sourceConn.rawQuery(
+                    "SELECT original_filename FROM chunked_files WHERE status = 'completed'", null
+                )
+                while (chunkedCursor.moveToNext()) {
+                    chunkedCursor.getString(0)?.let { chunkedFileNames.add(it) }
+                }
+                chunkedCursor.close()
+                Log.i(TAG, "migrateFromDesktopToAndroid: Found ${chunkedFileNames.size} chunked file names")
+            }
             
             // Migrate from 'files' table (desktop format)
             if (tables.contains("files")) {
                 val cursor = sourceConn.rawQuery(
-                    "SELECT file_id, file_name, file_size, upload_date, mime_type, message_id, telegram_file_id FROM files",
+                    "SELECT file_id, file_name, file_size, upload_date, mime_type, message_id, telegram_file_id, uploader_bot_token FROM files",
                     null
                 )
                 
-                Log.i(TAG, "migrateDesktopDatabase: Found ${cursor.count} files in desktop database")
+                Log.i(TAG, "migrateFromDesktopToAndroid: Found ${cursor.count} files in desktop database")
                 
                 while (cursor.moveToNext()) {
                     val fileId = cursor.getString(0) ?: continue
                     val fileName = cursor.getString(1) ?: "unknown"
+                    
+                    // Skip if this file is also in chunked_files
+                    if (chunkedFileNames.contains(fileName)) {
+                        Log.d(TAG, "migrateFromDesktopToAndroid: Skipping '$fileName' (is chunked file)")
+                        continue
+                    }
+                    
                     val fileSize = cursor.getLong(2)
                     val uploadDate = cursor.getString(3) ?: ""
                     val mimeType = cursor.getString(4)
                     val messageId = cursor.getLong(5)
                     val telegramFileId = cursor.getString(6) ?: fileId
+                    val uploaderToken = cursor.getString(7) ?: ""
                     
                     // Parse upload date to timestamp
                     val uploadedAt = try {
@@ -486,25 +530,35 @@ class BackupManager(
                         "https://t.me/c/$internalId/$messageId"
                     } else null
                     
-                    targetConn.execSQL(
-                        """INSERT INTO cloud_files 
-                           (telegram_message_id, file_id, file_unique_id, file_name, mime_type, size_bytes, uploaded_at, caption, share_link, checksum)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        arrayOf(messageId, telegramFileId, fileId, fileName, mimeType, fileSize, uploadedAt, null, shareLink, null)
+                    // Insert using Room DAO
+                    database.cloudFileDao().insert(
+                        com.telegram.cloud.data.local.CloudFileEntity(
+                            telegramMessageId = messageId,
+                            fileId = telegramFileId,
+                            fileUniqueId = fileId,
+                            fileName = fileName,
+                            mimeType = mimeType,
+                            sizeBytes = fileSize,
+                            uploadedAt = uploadedAt,
+                            caption = null,
+                            shareLink = shareLink,
+                            checksum = null,
+                            uploaderTokens = uploaderToken
+                        )
                     )
                     migratedCount++
                 }
                 cursor.close()
             }
             
-            // Also check for chunked_files table
+            // Migrate chunked_files table
             if (tables.contains("chunked_files")) {
                 val cursor = sourceConn.rawQuery(
-                    "SELECT file_id, original_filename, mime_type, total_size, total_chunks, created_at, status FROM chunked_files WHERE status = 'completed'",
+                    "SELECT file_id, original_filename, mime_type, total_size, total_chunks, upload_started FROM chunked_files WHERE status = 'completed'",
                     null
                 )
                 
-                Log.i(TAG, "migrateDesktopDatabase: Found ${cursor.count} chunked files")
+                Log.i(TAG, "migrateFromDesktopToAndroid: Found ${cursor.count} chunked files")
                 
                 while (cursor.moveToNext()) {
                     val fileId = cursor.getString(0) ?: continue
@@ -512,25 +566,27 @@ class BackupManager(
                     val mimeType = cursor.getString(2)
                     val totalSize = cursor.getLong(3)
                     val totalChunks = cursor.getInt(4)
-                    val createdAt = cursor.getString(5) ?: ""
+                    val uploadStarted = cursor.getString(5) ?: ""
                     
                     val uploadedAt = try {
                         java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
-                            .parse(createdAt)?.time ?: System.currentTimeMillis()
+                            .parse(uploadStarted)?.time ?: System.currentTimeMillis()
                     } catch (e: Exception) {
                         System.currentTimeMillis()
                     }
                     
-                    // Get chunk message IDs
+                    // Get chunk message IDs and tokens
                     val chunksCursor = sourceConn.rawQuery(
-                        "SELECT message_id, telegram_file_id FROM file_chunks WHERE file_id = ? ORDER BY chunk_number",
+                        "SELECT message_id, telegram_file_id, uploader_bot_token FROM file_chunks WHERE file_id = ? ORDER BY chunk_number",
                         arrayOf(fileId)
                     )
                     val messageIds = mutableListOf<Long>()
                     val telegramFileIds = mutableListOf<String>()
+                    val uploaderTokens = mutableListOf<String>()
                     while (chunksCursor.moveToNext()) {
                         messageIds.add(chunksCursor.getLong(0))
                         telegramFileIds.add(chunksCursor.getString(1) ?: "")
+                        uploaderTokens.add(chunksCursor.getString(2) ?: "")
                     }
                     chunksCursor.close()
                     
@@ -542,12 +598,23 @@ class BackupManager(
                     
                     val caption = "[CHUNKED:$totalChunks|${messageIds.joinToString(",")}]"
                     val fileUniqueId = telegramFileIds.joinToString(",")
+                    val uploaderTokensStr = uploaderTokens.joinToString(",")
                     
-                    targetConn.execSQL(
-                        """INSERT INTO cloud_files 
-                           (telegram_message_id, file_id, file_unique_id, file_name, mime_type, size_bytes, uploaded_at, caption, share_link, checksum)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        arrayOf(firstMessageId, fileId, fileUniqueId, fileName, mimeType, totalSize, uploadedAt, caption, shareLink, null)
+                    // Insert using Room DAO
+                    database.cloudFileDao().insert(
+                        com.telegram.cloud.data.local.CloudFileEntity(
+                            telegramMessageId = firstMessageId,
+                            fileId = fileId,
+                            fileUniqueId = fileUniqueId,
+                            fileName = fileName,
+                            mimeType = mimeType,
+                            sizeBytes = totalSize,
+                            uploadedAt = uploadedAt,
+                            caption = caption,
+                            shareLink = shareLink,
+                            checksum = null,
+                            uploaderTokens = uploaderTokensStr
+                        )
                     )
                     migratedCount++
                 }
@@ -555,9 +622,8 @@ class BackupManager(
             }
             
             sourceConn.close()
-            targetConn.close()
             
-            Log.i(TAG, "migrateDesktopDatabase: Migration complete. Migrated $migratedCount files")
+            Log.i(TAG, "migrateFromDesktopToAndroid: Migration complete. Migrated $migratedCount files")
             
         } catch (e: Exception) {
             Log.e(TAG, "migrateDesktopDatabase: Error during migration", e)

@@ -7,6 +7,7 @@ import com.telegram.cloud.data.local.CloudDatabase
 import com.telegram.cloud.data.prefs.configStore
 import com.telegram.cloud.data.remote.TelegramBotClient
 import com.telegram.cloud.data.repository.TelegramRepository
+import com.telegram.cloud.gallery.GalleryRestoreManager
 import com.telegram.cloud.gallery.GallerySyncManager
 import com.telegram.cloud.gallery.MediaScanner
 import com.telegram.cloud.tasks.TaskQueueManager
@@ -84,6 +85,13 @@ class AppContainer(context: Context) {
         database = database,
         galleryDao = database.galleryMediaDao(),
         repository = repository
+    )
+    
+    val galleryRestoreManager = GalleryRestoreManager(
+        context = appContext,
+        database = database,
+        galleryDao = database.galleryMediaDao(),
+        syncManager = gallerySyncManager
     )
     
     // Task queue manager

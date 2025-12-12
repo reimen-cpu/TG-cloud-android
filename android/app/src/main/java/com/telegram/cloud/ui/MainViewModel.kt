@@ -236,6 +236,8 @@ class MainViewModel(
             try {
                 backupManager.restoreBackup(sourceFile, password)
                 _events.emit(UiEvent.Message(context.getString(R.string.backup_restored_restarting)))
+                // Small delay to ensure message is shown before restart
+                kotlinx.coroutines.delay(500)
                 _events.emit(UiEvent.RestartApp)
             } catch (ex: Exception) {
                 _events.emit(UiEvent.Message(context.getString(R.string.error_restoring, ex.message ?: context.getString(R.string.unknown_error))))

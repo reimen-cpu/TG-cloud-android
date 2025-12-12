@@ -17,7 +17,7 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 
 private const val TAG = "GalleryRestoreManager"
-private const val MAX_PARALLEL_DOWNLOADS = 3
+private const val MAX_PARALLEL_DOWNLOADS = 1  // Sequential downloads to prevent OOM with chunked files
 
 class GalleryRestoreManager(
     private val context: Context,
@@ -87,51 +87,67 @@ class GalleryRestoreManager(
         val completedCount = AtomicInteger(0)
         val successCount = AtomicInteger(0)
         val failureCount = AtomicInteger(0)
-        val activeProgresses = java.util.concurrent.ConcurrentHashMap<String, Float>()
         
-        // Semaphore to limit parallel downloads
+        // Process in smaller batches to avoid OOM from creating too many coroutines
+        val BATCH_SIZE = 10  // Reduced from 50 for better memory management
+        val batches = toRestore.chunked(BATCH_SIZE)
+        
+        // Semaphore to limit parallel downloads within each batch
         val semaphore = Semaphore(MAX_PARALLEL_DOWNLOADS)
 
         try {
-            val jobs = toRestore.map { media ->
-                async {
-                    semaphore.withPermit {
-                        ensureActive()
-                        
-                        // Update UI to show this file is starting
-                        _currentFileName.value = media.filename
-                        val currentCompleted = completedCount.get()
-                        _restoreState.value = RestoreState.Restoring(media.filename, currentCompleted + 1, total)
-                        onProgress?.invoke(currentCompleted + 1, total, media.filename)
-                        
-                        activeProgresses[media.filename] = 0f
-                        
-                        val resultPath = syncManager.downloadMediaFromTelegram(media, config) { progress ->
-                            activeProgresses[media.filename] = progress
+            // Process batches sequentially
+            for ((batchIndex, batch) in batches.withIndex()) {
+                ensureActive()
+                
+                Log.d(TAG, "Processing batch ${batchIndex + 1}/${batches.size} (${batch.size} files)")
+                
+                // Process files in current batch in parallel (up to MAX_PARALLEL_DOWNLOADS)
+                val batchJobs = batch.map { media ->
+                    async {
+                        semaphore.withPermit {
+                            ensureActive()
                             
-                            // Calculate global progress
-                            val currentActiveSum = activeProgresses.values.sum()
-                            val globalProgress = (completedCount.get() + currentActiveSum) / total
+                            // Update UI to show this file is starting
+                            _currentFileName.value = media.filename
+                            val currentCompleted = completedCount.get()
+                            _restoreState.value = RestoreState.Restoring(media.filename, currentCompleted + 1, total)
+                            onProgress?.invoke(currentCompleted + 1, total, media.filename)
+                            
+                            val resultPath = try {
+                                syncManager.downloadMediaFromTelegram(media, config) { progress ->
+                                    // Individual file progress (not used for global progress calculation)
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error downloading ${media.filename}", e)
+                                null
+                            }
+                            
+                            val completed = completedCount.incrementAndGet()
+                            
+                            if (resultPath != null) {
+                                successCount.incrementAndGet()
+                            } else {
+                                failureCount.incrementAndGet()
+                            }
+                            
+                            // Update global progress
+                            val globalProgress = completed.toFloat() / total
                             _restoreProgress.value = globalProgress
                         }
-                        
-                        activeProgresses.remove(media.filename)
-                        completedCount.incrementAndGet()
-                        
-                        if (resultPath != null) {
-                            successCount.incrementAndGet()
-                        } else {
-                            failureCount.incrementAndGet()
-                        }
-                        
-                        // Final progress update for this step
-                        val globalProgress = completedCount.get().toFloat() / total
-                        _restoreProgress.value = globalProgress
                     }
                 }
+                
+                // Wait for current batch to complete before moving to next
+                batchJobs.awaitAll()
+                
+                // Memory cleanup between batches
+                if (batchIndex < batches.size - 1) {
+                    Log.d(TAG, "Cleaning up memory after batch ${batchIndex + 1}")
+                    System.gc()
+                    delay(500) // Give GC time to clean up
+                }
             }
-            
-            jobs.awaitAll()
 
             val failures = failureCount.get()
             val success = successCount.get()
