@@ -12,6 +12,8 @@ Markdown
 
 # Telegram Cloud Android
 
+[![F-Droid](https://img.shields.io/f-droid/v/com.telegram.cloud.svg)](https://f-droid.org/packages/com.telegram.cloud/)
+
 Aplicación Android para gestionar archivos en la nube usando Telegram como backend. **Tu nube, tus reglas.**
 
 ## 🚀 Características Principales
@@ -50,7 +52,12 @@ Aplicación Android para gestionar archivos en la nube usando Telegram como back
 
 ## 📦 Instalación
 
-### Opción 1: Descargar APK (Recomendado)
+### Opción 1: Instalar desde F-Droid (Recomendado)
+<a href="https://f-droid.org/packages/com.telegram.cloud/">
+    <img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png" alt="Get it on F-Droid" height="80">
+</a>
+
+### Opción 2: Descargar APK
 Ve a la sección [Release](https://github.com/reimen-cpu/TG-cloud-android/releases/tag/V1.0.0) y descarga la última versión.
 
 ### Opción 2: Compilación Manual

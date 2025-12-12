@@ -1,0 +1,16 @@
+Aplicación Android para gestionar archivos en la nube usando Telegram como backend.
+
+**Características Principales:**
+
+*   **Sin Límites:** Almacenamiento y tamaño de archivo ilimitados (subida por fragmentos).
+*   **Gestión de Archivos:** Subida, descarga y organización de archivos.
+*   **Galería Multimedia:** Visor de imágenes y videos integrado con streaming.
+*   **Seguridad:** Base de datos cifrada (SQLCipher) y uso de bots propios.
+*   **Compartir:** Generación de archivos .link para compartir contenido de forma segura.
+*   **Privacidad:** Tus datos se almacenan en tus propios chats de Telegram ("Mensajes Guardados").
+
+**Requisitos:**
+*   Bot de Telegram propio (token de @BotFather).
+*   Android 9.0+.
+
+**Nota:** Esta aplicación no es oficial de Telegram y utiliza la API de Bots de Telegram.

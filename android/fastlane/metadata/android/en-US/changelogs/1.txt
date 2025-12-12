@@ -1,0 +1,4 @@
+Initial release of TG Cloud Android.
+* Unlimited file management with Telegram.
+* Native upload and download.
+* Integrated media gallery.

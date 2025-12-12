@@ -1,0 +1,16 @@
+Android application to manage files in the cloud using Telegram as backend.
+
+**Main Features:**
+
+*   **No Limits:** Unlimited storage and file size (chunked upload).
+*   **File Management:** Native upload, download and organization.
+*   **Media Gallery:** Integrated image and video viewer with streaming.
+*   **Security:** Encrypted database (SQLCipher) and custom bot support.
+*   **Share:** Generate .link files to share content securely.
+*   **Privacy:** Your data is stored in your own Telegram chats ("Saved Messages").
+
+**Requirements:**
+*   Own Telegram Bot (token from @BotFather).
+*   Android 9.0+.
+
+**Note:** This application is not official from Telegram and uses the Telegram Bot API.
