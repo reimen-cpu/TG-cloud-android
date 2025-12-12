@@ -125,3 +125,7 @@ android/local.properties
 
 # Local configuration files (contain SDK paths, API keys, etc.)
 **/local.properties
+
+# Forzar la inclusión de la librería JSON
+!telegram-cloud-cpp/third_party/json/
+!telegram-cloud-cpp/third_party/json/**
