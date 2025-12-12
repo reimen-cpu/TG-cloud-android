@@ -21,7 +21,7 @@ Builds:
       - yes
     ndk: r25c
     scandelete:
-      - android/fastlane
+      - fastlane
     prebuild:
       - sed -i -e '/signingConfigs/,/}/d' app/build.gradle.kts
       - sed -i -e '/signingConfig/d' app/build.gradle.kts
