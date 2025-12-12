@@ -2,8 +2,12 @@ code
 Markdown
 
 <div style="display: flex; gap: 10px;">
-  <img src="android/img/photo_2025-12-11_22-21-24.jpg" width="300">
+
   <img src="android/img/photo_2025-12-11_22-23-07.jpg" width="300">
+
+  
+  <img src="android/img/photo_2025-12-11_22-21-24.jpg" width="300">
+ 
 </div>
 
 # Telegram Cloud Android
