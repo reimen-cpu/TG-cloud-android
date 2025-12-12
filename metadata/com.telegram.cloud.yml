@@ -2,18 +2,12 @@ Categories:
   - Internet
   - System
 License: GPL-3.0-only
+AuthorName: reimen-cpu
 SourceCode: https://github.com/reimen-cpu/TG-cloud-android
 IssueTracker: https://github.com/reimen-cpu/TG-cloud-android/issues
 Changelog: https://github.com/reimen-cpu/TG-cloud-android/releases
 
-AutoUpdateMode: Version v%v
-UpdateCheckMode: Tags
-CurrentVersion: 1.0.0
-CurrentVersionCode: 1
-
-AntiFeatures:
-  - NonFreeNet
-  - NetworkRestriction
+AutoName: TG Cloud Android
 
 RepoType: git
 Repo: https://github.com/reimen-cpu/TG-cloud-android
@@ -31,6 +25,15 @@ Builds:
     prebuild:
       - sed -i -e '/signingConfigs/,/}/d' app/build.gradle.kts
       - sed -i -e '/signingConfig/d' app/build.gradle.kts
+
+AutoUpdateMode: Version v%v
+UpdateCheckMode: Tags
+CurrentVersion: 1.0.0
+CurrentVersionCode: 1
+
+AntiFeatures:
+  - NonFreeNet
+  - NetworkRestriction
 
 MaintainerNotes: |
   Requires NDK r25c.
