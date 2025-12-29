@@ -26,9 +26,10 @@ class MultiLinkDownloadManager(
         onProgress: ((Float, String) -> Unit)? = null
     ): List<LinkDownloadManager.DownloadResult> = withContext(Dispatchers.IO) {
         try {
+            Log.d(TAG, "downloadFromMultiLink: file=${linkFile.absolutePath}, password.length=${password.length}")
             val linkData = shareLinkManager.readLinkFile(linkFile, password)
             if (linkData == null) {
-                Log.e(TAG, "Failed to read link file or wrong password")
+                Log.e(TAG, "Failed to read link file or wrong password. File size: ${linkFile.length()} bytes")
                 return@withContext emptyList()
             }
 

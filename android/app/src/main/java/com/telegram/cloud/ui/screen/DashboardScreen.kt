@@ -135,6 +135,10 @@ fun DashboardScreen(
     isGallerySyncing: Boolean = false,
     gallerySyncProgress: Float = 0f,
     gallerySyncFileName: String? = null,
+    // Link download state
+    isLinkDownloading: Boolean = false,
+    linkDownloadProgress: Float = 0f,
+    linkDownloadFileName: String? = null,
     // Refresh callback
     onRefresh: () -> Unit = {},
     // Multi-file callbacks
@@ -575,6 +579,20 @@ fun DashboardScreen(
                     GallerySyncProgressCard(
                         fileName = gallerySyncFileName ?: stringResource(R.string.syncing_gallery),
                         progress = gallerySyncProgress
+                    )
+                }
+            }
+            
+            item {
+                AnimatedVisibility(
+                    visible = isLinkDownloading,
+                    enter = slideInVertically() + fadeIn(),
+                    exit = slideOutVertically() + fadeOut()
+                ) {
+                    ProgressCard(
+                        isUpload = false,
+                        fileName = linkDownloadFileName ?: stringResource(R.string.downloading_link),
+                        progress = linkDownloadProgress
                     )
                 }
             }

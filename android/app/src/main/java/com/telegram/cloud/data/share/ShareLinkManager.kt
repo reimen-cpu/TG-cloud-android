@@ -138,15 +138,16 @@ class ShareLinkManager {
         password: String
     ): ShareLinkData? {
         return try {
-            Log.i(TAG, "Reading .link file: ${linkFile.absolutePath}")
+            Log.i(TAG, "Reading .link file: ${linkFile.absolutePath} (password.length=${password.length})")
             
             val encryptedData = linkFile.readBytes()
+            Log.d(TAG, "Read ${encryptedData.size} bytes from link file")
             val jsonData = decryptData(encryptedData, password)
             
             Log.d(TAG, "Decrypted JSON: $jsonData")
             parseJsonData(jsonData)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to read link file", e)
+            Log.e(TAG, "Failed to read link file: ${e.javaClass.simpleName}: ${e.message}", e)
             null
         }
     }

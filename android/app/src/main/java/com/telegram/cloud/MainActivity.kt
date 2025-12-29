@@ -349,15 +349,26 @@ class MainActivity : ComponentActivity() {
                                         enabled = linkPassword.isNotBlank(),
                                         onClick = {
                                             pendingLinkFile?.let { linkFile ->
+                                                // Capture values BEFORE resetting state to avoid race condition
+                                                val passwordToUse = linkPassword
+                                                val fileToDownload = linkFile
+                                                
+                                                // Reset state immediately
+                                                showLinkPasswordDialog = false
+                                                linkPassword = ""
+                                                pendingLinkFile = null
+                                                
                                                 scope.launch {
                                                     isBatchDownloading = true
                                                     batchDownloadTotal = 0 // Unknown initially or could be read from link metadata
                                                     batchDownloadCurrent = 0
                                                     batchDownloadProgress = 0f
                                                     
+                                                    Log.i("MainActivity", "Download from link: file=${fileToDownload.absolutePath}, password.length=${passwordToUse.length}")
+                                                    
                                                     val results = multiLinkDownloadManager.downloadFromMultiLink(
-                                                        linkFile = linkFile,
-                                                        password = linkPassword,
+                                                        linkFile = fileToDownload,
+                                                        password = passwordToUse,
                                                         destDir = linkDownloadTempDir
                                                     ) { progress, phase ->
                                                         batchDownloadProgress = progress
@@ -393,9 +404,6 @@ class MainActivity : ComponentActivity() {
                                                     }
                                                 }
                                             }
-                                            showLinkPasswordDialog = false
-                                            linkPassword = ""
-                                            pendingLinkFile = null
                                         }
                                     ) {
                                         Text(stringResource(R.string.download))
@@ -488,7 +496,8 @@ class MainActivity : ComponentActivity() {
                                         enabled = sharePassword.isNotBlank(),
                                         onClick = {
                                             fileToShare?.let { file ->
-                                                val linkFile = File(linksDir, "${sanitizeFileName(file.fileName)}.link")
+                                                val shortSize = formatShortSize(file.sizeBytes)
+                                                val linkFile = File(linksDir, "${sanitizeFileName(file.fileName)}-${shortSize}.link")
                                                 viewModel.generateLinkFile(file, sharePassword, linkFile) { success ->
                                                     if (success) {
                                                         // Share the .link file
@@ -554,7 +563,8 @@ class MainActivity : ComponentActivity() {
                                         enabled = sharePassword.isNotBlank(),
                                         onClick = {
                                             mediaToShare?.let { media ->
-                                                val linkFile = File(linksDir, "${sanitizeFileName(media.filename)}.link")
+                                                val shortSize = formatShortSize(media.sizeBytes)
+                                                val linkFile = File(linksDir, "${sanitizeFileName(media.filename)}-${shortSize}.link")
                                                 viewModel.generateLinkFileFromGallery(media, sharePassword, linkFile) { success ->
                                                     if (success) {
                                                         // Share the .link file
@@ -635,7 +645,16 @@ class MainActivity : ComponentActivity() {
                                                 
                                                 // Capture password before resetting state
                                                 val passwordToUse = sharePassword
-                                                val linkFile = File(linksDir, "batch_share_${System.currentTimeMillis()}.link")
+                                                
+                                                // Generate descriptive filename
+                                                val totalSize = mediaList.sumOf { it.sizeBytes }
+                                                val shortSize = formatShortSize(totalSize)
+                                                val linkFileName = if (mediaList.size == 1) {
+                                                    "${sanitizeFileName(mediaList.first().filename)}-${shortSize}.link"
+                                                } else {
+                                                    "batch_${mediaList.size}files-${shortSize}.link"
+                                                }
+                                                val linkFile = File(linksDir, linkFileName)
                                                 
                                                 // Reset state immediately
                                                 showShareDialog = false
@@ -719,7 +738,16 @@ class MainActivity : ComponentActivity() {
                                                 
                                                 // Capture password before resetting state
                                                 val passwordToUse = sharePassword
-                                                val linkFile = File(linksDir, "batch_share_${System.currentTimeMillis()}.link")
+                                                
+                                                // Generate descriptive filename
+                                                val totalSize = files.sumOf { it.sizeBytes }
+                                                val shortSize = formatShortSize(totalSize)
+                                                val linkFileName = if (files.size == 1) {
+                                                    "${sanitizeFileName(files.first().fileName)}-${shortSize}.link"
+                                                } else {
+                                                    "batch_${files.size}files-${shortSize}.link"
+                                                }
+                                                val linkFile = File(linksDir, linkFileName)
                                                 
                                                 // Reset state immediately
                                                 showShareDialog = false
@@ -840,35 +868,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         
-                        // Batch Download Progress Dialog
-                        if (isBatchDownloading) {
-                            AlertDialog(
-                                onDismissRequest = { /* Prevent dismiss */ },
-                                title = { Text(stringResource(R.string.downloading_files, batchDownloadTotal)) },
-                                text = {
-                                    Column {
-                                        LinearProgressIndicator(
-                                            progress = { batchDownloadProgress },
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-                                        Spacer(Modifier.height(8.dp))
-                                        Text(
-                                            text = "$batchDownloadCurrent / $batchDownloadTotal",
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                    }
-                                },
-                                confirmButton = {},
-                                dismissButton = {
-                                    TextButton(onClick = { 
-                                        // TODO: Implement cancellation logic in managers
-                                        resetBatchState() 
-                                    }) {
-                                        Text(stringResource(R.string.cancel))
-                                    }
-                                }
-                            )
-                        }
+                        // Batch Download Progress is now shown inline via DashboardScreen ProgressCard
 
                         val storagePermissions = remember {
                             when {
@@ -1342,6 +1342,10 @@ class MainActivity : ComponentActivity() {
                                 isGallerySyncing = isGallerySyncing,
                                 gallerySyncProgress = gallerySyncProgress,
                                 gallerySyncFileName = gallerySyncFileName,
+                                // Link download state for progress display
+                                isLinkDownloading = isBatchDownloading,
+                                linkDownloadProgress = batchDownloadProgress,
+                                linkDownloadFileName = null, // Will show generic message
                                 // Pull-to-refresh
                                 onRefresh = {
                                     scope.launch {
@@ -1446,6 +1450,15 @@ class MainActivity : ComponentActivity() {
     private fun sanitizeFileName(name: String): String {
         val sanitized = name.replace(Regex("[^A-Za-z0-9._-]"), "_")
         return if (sanitized.isBlank()) "tg-file" else sanitized
+    }
+    
+    private fun formatShortSize(bytes: Long): String {
+        return when {
+            bytes >= 1_000_000_000 -> "${bytes / 1_000_000_000}gb"
+            bytes >= 1_000_000 -> "${bytes / 1_000_000}mb"
+            bytes >= 1_000 -> "${bytes / 1_000}kb"
+            else -> "${bytes}b"
+        }
     }
 
     private fun restartApp() {

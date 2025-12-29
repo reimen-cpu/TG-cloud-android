@@ -73,6 +73,7 @@ class MultiLinkGenerator(
                         Log.e(TAG, "DEBUG: Immediate readback EXCEPTION", e)
                     }
                 }
+                success
             } else {
                 shareLinkManager.generateBatchLinkFile(entities, botTokens, password, outputFile)
             }
@@ -137,6 +138,7 @@ class MultiLinkGenerator(
                         Log.e(TAG, "DEBUG: Immediate readback EXCEPTION", e)
                     }
                 }
+                success
             } else {
                 shareLinkManager.generateBatchLinkFile(entities, botTokens, password, outputFile)
             }
