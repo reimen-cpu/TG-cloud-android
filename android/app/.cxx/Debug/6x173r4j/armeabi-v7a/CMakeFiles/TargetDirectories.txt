@@ -1,7 +1,0 @@
-C:/Users/Lenovo/Desktop/android app/android/app/.cxx/Debug/6x173r4j/armeabi-v7a/CMakeFiles/telegramcloud_core.dir
-C:/Users/Lenovo/Desktop/android app/android/app/.cxx/Debug/6x173r4j/armeabi-v7a/CMakeFiles/edit_cache.dir
-C:/Users/Lenovo/Desktop/android app/android/app/.cxx/Debug/6x173r4j/armeabi-v7a/CMakeFiles/rebuild_cache.dir
-C:/Users/Lenovo/Desktop/android app/android/app/.cxx/Debug/6x173r4j/armeabi-v7a/CMakeFiles/list_install_components.dir
-C:/Users/Lenovo/Desktop/android app/android/app/.cxx/Debug/6x173r4j/armeabi-v7a/CMakeFiles/install.dir
-C:/Users/Lenovo/Desktop/android app/android/app/.cxx/Debug/6x173r4j/armeabi-v7a/CMakeFiles/install/local.dir
-C:/Users/Lenovo/Desktop/android app/android/app/.cxx/Debug/6x173r4j/armeabi-v7a/CMakeFiles/install/strip.dir

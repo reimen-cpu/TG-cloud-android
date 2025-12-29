@@ -23,6 +23,7 @@ Builds:
     scandelete:
       - fastlane
     prebuild:
+      - cd .. && bash auto-build.sh
       - sed -i -e '/signingConfigs/,/}/d' app/build.gradle.kts
       - sed -i -e '/signingConfig/d' app/build.gradle.kts
 

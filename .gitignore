@@ -129,3 +129,7 @@ android/local.properties
 # Forzar la inclusión de la librería JSON
 !telegram-cloud-cpp/third_party/json/
 !telegram-cloud-cpp/third_party/json/**
+
+# User requested ignores (redundant but explicit)
+android/app/.cxx/
+android/.gradle/

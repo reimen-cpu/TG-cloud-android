@@ -30,6 +30,11 @@ class MultiLinkGenerator(
         outputFile: File
     ): Boolean = withContext(Dispatchers.IO) {
         try {
+            if (password.isBlank()) {
+                Log.e(TAG, "Password cannot be empty")
+                return@withContext false
+            }
+
             val cfg = repository.config.first()
             if (cfg == null) {
                 Log.e(TAG, "No config available")
@@ -53,7 +58,24 @@ class MultiLinkGenerator(
 
             if (entities.isEmpty()) return@withContext false
 
-            shareLinkManager.generateBatchLinkFile(entities, botTokens, password, outputFile)
+            if (entities.size == 1) {
+                Log.i(TAG, "Generating single .link file for gallery item")
+                val success = shareLinkManager.generateLinkFile(entities.first(), botTokens.first(), password, outputFile)
+                if (success) {
+                    try {
+                        val debugRead = shareLinkManager.readLinkFile(outputFile, password)
+                        if (debugRead == null) {
+                            Log.e(TAG, "DEBUG: Immediate readback FAILED for single link (Gallery)!")
+                        } else {
+                            Log.i(TAG, "DEBUG: Immediate readback SUCCESS. Type=${debugRead.type}, Files=${debugRead.files.size}")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "DEBUG: Immediate readback EXCEPTION", e)
+                    }
+                }
+            } else {
+                shareLinkManager.generateBatchLinkFile(entities, botTokens, password, outputFile)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error generating gallery link", e)
             false
@@ -69,6 +91,11 @@ class MultiLinkGenerator(
         outputFile: File
     ): Boolean = withContext(Dispatchers.IO) {
         try {
+            if (password.isBlank()) {
+                Log.e(TAG, "Password cannot be empty")
+                return@withContext false
+            }
+
             val cfg = repository.config.first()
             if (cfg == null) {
                 Log.e(TAG, "No config available")
@@ -94,7 +121,25 @@ class MultiLinkGenerator(
             if (entities.isEmpty()) return@withContext false
 
             Log.d(TAG, "generateForDashboard: password length = ${password.length}, password = '$password'")
-            shareLinkManager.generateBatchLinkFile(entities, botTokens, password, outputFile)
+            
+            if (entities.size == 1) {
+                Log.i(TAG, "Generating single .link file for dashboard item")
+                val success = shareLinkManager.generateLinkFile(entities.first(), botTokens.first(), password, outputFile)
+                if (success) {
+                    try {
+                        val debugRead = shareLinkManager.readLinkFile(outputFile, password)
+                        if (debugRead == null) {
+                            Log.e(TAG, "DEBUG: Immediate readback FAILED for single link (Dashboard)!")
+                        } else {
+                            Log.i(TAG, "DEBUG: Immediate readback SUCCESS. Type=${debugRead.type}, Files=${debugRead.files.size}")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "DEBUG: Immediate readback EXCEPTION", e)
+                    }
+                }
+            } else {
+                shareLinkManager.generateBatchLinkFile(entities, botTokens, password, outputFile)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error generating dashboard link", e)
             false
