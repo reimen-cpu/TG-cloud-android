@@ -15,7 +15,13 @@ Android application to manage files in the cloud using Telegram as a backend. **
 
 ### No Size or Storage Limits
 
-**⚠️ IMPORTANT: This application has NO file size or storage limits.**
+**⚠️ IMPORTANT:
+
+- Minimum Android version: 8.0 (API 28)
+- Target Android version: 14 (API 34)
+- Requires a Telegram bot token and private channel for operation
+
+This application has NO file size or storage limits.**
 
 - **Large files**: Uses chunked upload (4MB) for files of any size.
 - **Unlimited storage**: Telegram imposes no practical storage limits.
