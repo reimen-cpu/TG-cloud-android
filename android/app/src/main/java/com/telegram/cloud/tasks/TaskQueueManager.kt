@@ -147,9 +147,12 @@ class TaskQueueManager(private val context: Context) {
         
         downloadQueue.addTasks(tasks)
         
-        // Enqueue WorkManager jobs for each task
-        tasks.forEach { task ->
-            val downloadRequest = task.downloadRequest ?: return@forEach
+        // Chain WorkManager jobs sequentially to prevent Telegram API rate limiting
+        // Running multiple parallel requests causes "wrong file_id" errors
+        if (tasks.isEmpty()) return
+        
+        val workRequests = tasks.map { task ->
+            val downloadRequest = task.downloadRequest ?: return@map null
             val inputData = workDataOf(
                 DownloadWorker.KEY_FILE_NAME to task.fileName,
                 DownloadWorker.KEY_MESSAGE_ID to downloadRequest.file.messageId,
@@ -157,11 +160,27 @@ class TaskQueueManager(private val context: Context) {
                 "task_id" to task.id
             )
             
-            val workRequest = OneTimeWorkRequestBuilder<DownloadWorker>()
+            OneTimeWorkRequestBuilder<DownloadWorker>()
                 .setInputData(inputData)
                 .build()
+        }.filterNotNull()
+        
+        if (workRequests.isNotEmpty()) {
+            // Chain all downloads sequentially using beginWith/then
+            var continuation = WorkManager.getInstance(context)
+                .beginUniqueWork(
+                    "batch_download_${System.currentTimeMillis()}",
+                    ExistingWorkPolicy.APPEND_OR_REPLACE,
+                    workRequests.first()
+                )
             
-            WorkManager.getInstance(context).enqueue(workRequest)
+            // Chain remaining requests
+            for (i in 1 until workRequests.size) {
+                continuation = continuation.then(workRequests[i])
+            }
+            
+            continuation.enqueue()
+            Log.i(TAG, "Chained ${workRequests.size} download tasks sequentially")
         }
         
         Log.d(TAG, "Added ${tasks.size} download tasks to queue")

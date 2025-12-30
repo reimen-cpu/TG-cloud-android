@@ -526,19 +526,26 @@ class TelegramRepository(
             // actualFileId ya está disponible desde arriba
             
             // Check if it's a chunked file usando metadatos de la base de datos
+            // Use multiple detection methods (same as ShareLinkManager):
+            // 1. Caption contains [CHUNKED: marker
             val isChunkedByCaption = ChunkedDownloadManager.isChunkedFile(entity.caption)
             
-            // También verificar si fileId parece un UUID (formato: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
-            // Los UUIDs tienen 36 caracteres con guiones en posiciones específicas
-            val looksLikeUUID = actualFileId.matches(Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", RegexOption.IGNORE_CASE))
+            // 2. fileUniqueId contains multiple comma-separated Telegram file IDs
+            val hasMultipleFileIds = entity.fileUniqueId?.contains(",") == true
             
-            // Si parece UUID, verificar si tiene fileUniqueId (que contiene los file_id de Telegram para chunked)
+            // 3. File size > 20MB (Telegram's limit for direct file download)
+            val isLargeFile = entity.sizeBytes > 20 * 1024 * 1024
+            
+            // 4. fileId looks like a UUID (legacy check)
+            val looksLikeUUID = actualFileId.matches(Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", RegexOption.IGNORE_CASE))
             val hasFileUniqueId = looksLikeUUID && entity.fileUniqueId?.isNotBlank() == true
             
-            val isChunked = isChunkedByCaption || hasFileUniqueId
+            val isChunked = isChunkedByCaption || hasMultipleFileIds || isLargeFile || hasFileUniqueId
+            
+            Log.i(TAG, "download: Chunked detection: caption=$isChunkedByCaption, multipleIds=$hasMultipleFileIds, largeFile=$isLargeFile, uuid=$hasFileUniqueId -> isChunked=$isChunked")
             
             if (isChunked) {
-                Log.i(TAG, "download: Chunked file detected (caption=$isChunkedByCaption, uuid=$looksLikeUUID), using chunked download")
+                Log.i(TAG, "download: Chunked file detected, using chunked download")
                 downloadChunked(request, cfg, taskId, destination, onProgress)
             } else {
                 Log.i(TAG, "download: Direct download for fileId=${actualFileId.take(50)}...")

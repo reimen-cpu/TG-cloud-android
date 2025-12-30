@@ -153,6 +153,7 @@ class LinkDownloadManager(
                             if (success) {
                                 val current = completedCount.incrementAndGet()
                                 val percent = (current.toDouble() / totalChunks) * 100.0
+                                Log.i(TAG, "Chunk progress: $current/$totalChunks = ${percent.toInt()}%")
                                 progressCallback?.invoke(current, totalChunks, "Downloading chunks", percent.coerceIn(0.0, 100.0))
                             }
                             success

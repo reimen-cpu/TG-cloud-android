@@ -36,7 +36,6 @@ class MultiLinkDownloadManager(
             val totalFiles = linkData.files.size
             var completedFiles = 0
             var currentFileProgress = 0.0
-            var lastFileIndex = 0
             
             val results = linkDownloadManager.downloadFromLink(
                 linkData = linkData,
@@ -45,33 +44,32 @@ class MultiLinkDownloadManager(
             ) { completed, total, phase, percent ->
                 // El callback reporta progreso de chunks o descarga directa
                 // percent es el porcentaje del archivo actual (0-100)
-                currentFileProgress = (percent / 100.0).coerceIn(0.0, 1.0)
+                Log.i(TAG, "Progress callback: completed=$completed, total=$total, phase=$phase, percent=$percent")
                 
-                // Extraer el índice del archivo actual del phase string que contiene "[N/M]"
-                val phaseMatch = Regex("\\[(\\d+)/(\\d+)\\]").find(phase)
-                val currentFileIndex = phaseMatch?.groupValues?.get(1)?.toIntOrNull() ?: (lastFileIndex + 1)
-                
-                // Si cambiamos de archivo, el anterior está completo
-                if (currentFileIndex > lastFileIndex && lastFileIndex > 0) {
-                    completedFiles = lastFileIndex
-                }
-                lastFileIndex = currentFileIndex
-                
-                // Si el archivo está completo (percent >= 100), actualizar completedFiles
-                if (percent >= 100.0 && currentFileIndex == totalFiles) {
-                    completedFiles = totalFiles
-                    currentFileProgress = 1.0
-                }
-                
-                // Calcular progreso total: archivos completados + progreso del archivo actual
-                val totalProgress = if (totalFiles > 0) {
-                    val baseProgress = completedFiles.toFloat() / totalFiles.toFloat()
+                // For single file downloads, just use the percentage directly
+                val totalProgress = if (totalFiles == 1) {
+                    // Single file - use the percentage directly (convert 0-100 to 0-1)
+                    (percent / 100.0).coerceIn(0.0, 1.0).toFloat()
+                } else {
+                    // Multiple files - calculate based on completed files + current file progress
+                    currentFileProgress = (percent / 100.0).coerceIn(0.0, 1.0)
+                    
+                    // Extraer el índice del archivo actual del phase string que contiene "[N/M]"
+                    val phaseMatch = Regex("\\[(\\d+)/(\\d+)\\]").find(phase)
+                    val currentFileIndex = phaseMatch?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                    
+                    // Si el archivo está completo (percent >= 100), actualizar completedFiles
+                    if (percent >= 100.0) {
+                        completedFiles = currentFileIndex
+                    }
+                    
+                    // Calcular progreso total: archivos completados + progreso del archivo actual
+                    val baseProgress = (completedFiles - 1).coerceAtLeast(0).toFloat() / totalFiles.toFloat()
                     val currentFileContribution = (currentFileProgress.toFloat() / totalFiles.toFloat())
                     (baseProgress + currentFileContribution).coerceIn(0f, 1f)
-                } else {
-                    currentFileProgress.toFloat()
                 }
                 
+                Log.i(TAG, "Forwarding progress: totalProgress=$totalProgress")
                 onProgress?.invoke(totalProgress, phase)
             }
             

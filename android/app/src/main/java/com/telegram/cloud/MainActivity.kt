@@ -74,6 +74,7 @@ import com.telegram.cloud.utils.getUserVisibleDownloadsDir
 import com.telegram.cloud.utils.getUserVisibleSubDir
 import com.telegram.cloud.utils.moveFileToDownloads
 import com.telegram.cloud.R
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -371,8 +372,11 @@ class MainActivity : ComponentActivity() {
                                                         password = passwordToUse,
                                                         destDir = linkDownloadTempDir
                                                     ) { progress, phase ->
+                                                        Log.i("MainActivity", "LinkDownload progress callback: progress=$progress, phase=$phase")
+                                                        // Update state directly - we're already in a coroutine on Dispatchers.IO
+                                                        // but Compose state updates are thread-safe
                                                         batchDownloadProgress = progress
-                                                        // Estimate current/total based on progress if possible, or just show percentage
+                                                        Log.i("MainActivity", "Updated batchDownloadProgress to $batchDownloadProgress")
                                                     }
                                                     
                                                     resetBatchState()
@@ -385,10 +389,13 @@ class MainActivity : ComponentActivity() {
                                                         results.forEach { result ->
                                                             result.filePath?.let { rawPath ->
                                                                 val file = File(rawPath)
-                                                                val extension = android.webkit.MimeTypeMap.getFileExtensionFromUrl(rawPath).lowercase()
+                                                                // Use file.extension instead of getFileExtensionFromUrl for better handling
+                                                                val extension = file.extension.lowercase()
                                                                 val resolvedMime = extension.takeIf { it.isNotBlank() }
                                                                     ?.let { android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) }
                                                                     ?: "application/octet-stream"
+                                                                
+                                                                Log.i("MainActivity", "Moving file: ${file.name}, ext=$extension, mime=$resolvedMime")
                                                                     
                                                                 moveFileToDownloads(
                                                                     context = context,

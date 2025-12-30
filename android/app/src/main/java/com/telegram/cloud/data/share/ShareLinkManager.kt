@@ -81,12 +81,23 @@ class ShareLinkManager {
     ): Boolean {
         return try {
             Log.i(TAG, "Generating .link file for: ${file.fileName}")
+            // Detect chunked files using multiple methods:
+            // 1. Caption contains [CHUNKED: marker
+            // 2. fileUniqueId contains multiple comma-separated Telegram file IDs
+            // 3. File size > 20MB (Telegram's limit for direct file download)
+            val hasChunkedCaption = ChunkedDownloadManager.isChunkedFile(file.caption)
+            val hasMultipleFileIds = file.fileUniqueId?.contains(",") == true
+            val isLargeFile = file.sizeBytes > 20 * 1024 * 1024 // > 20MB
             
-            val isChunked = ChunkedDownloadManager.isChunkedFile(file.caption)
+            val isChunked = hasChunkedCaption || hasMultipleFileIds || isLargeFile
+            
+            Log.i(TAG, "Chunked detection: caption=${hasChunkedCaption}, multipleIds=${hasMultipleFileIds}, largeFile=${isLargeFile} -> isChunked=$isChunked")
+            Log.i(TAG, "File: ${file.fileName}, size=${file.sizeBytes}, caption=${file.caption?.take(50)}, fileUniqueId=${file.fileUniqueId?.take(50)}")
+            
             val chunks = if (isChunked) parseChunksFromEntity(file, botToken) else null
             
             val jsonData = buildSingleFileJson(file, botToken, chunks)
-            Log.d(TAG, "JSON data: $jsonData")
+            Log.d(TAG, "isChunked: $isChunked, chunks count: ${chunks?.size ?: 0}")
             
             val encryptedData = encryptData(jsonData, password)
             
@@ -210,7 +221,13 @@ class ShareLinkManager {
             val filesArray = JSONArray()
             files.forEachIndexed { index, file ->
                 val botToken = botTokens.getOrElse(index % botTokens.size) { botTokens.first() }
-                val isChunked = ChunkedDownloadManager.isChunkedFile(file.caption)
+                
+                // Use same multi-method chunked detection as generateLinkFile
+                val hasChunkedCaption = ChunkedDownloadManager.isChunkedFile(file.caption)
+                val hasMultipleFileIds = file.fileUniqueId?.contains(",") == true
+                val isLargeFile = file.sizeBytes > 20 * 1024 * 1024
+                val isChunked = hasChunkedCaption || hasMultipleFileIds || isLargeFile
+                
                 val chunks = if (isChunked) parseChunksFromEntity(file, botToken) else null
                 
                 filesArray.put(buildFileJsonObject(file, botToken, chunks))
@@ -267,9 +284,18 @@ class ShareLinkManager {
     }
     
     private fun parseChunksFromEntity(file: CloudFileEntity, defaultBotToken: String): List<SharedChunkInfo>? {
-        val caption = file.caption ?: return null
-        val chunkCount = ChunkedDownloadManager.getChunkCount(caption) ?: return null
-        val telegramFileIds = file.fileUniqueId?.split(",") ?: return null
+        // Get telegram file IDs from fileUniqueId field (comma-separated)
+        val telegramFileIds = file.fileUniqueId?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+        
+        if (telegramFileIds.isNullOrEmpty()) {
+            Log.w(TAG, "parseChunksFromEntity: No file IDs found for ${file.fileName}")
+            return null
+        }
+        
+        // Try to get chunk count from caption first, fall back to counting file IDs
+        val chunkCount = ChunkedDownloadManager.getChunkCount(file.caption) ?: telegramFileIds.size
+        
+        Log.i(TAG, "parseChunksFromEntity: ${file.fileName} has $chunkCount chunks, ${telegramFileIds.size} file IDs")
         
         // Get per-chunk bot tokens (stored during upload)
         val uploaderTokens = file.uploaderTokens?.split(",") ?: emptyList()
@@ -284,7 +310,7 @@ class ShareLinkManager {
                 totalChunks = chunkCount,
                 chunkSize = 4 * 1024 * 1024L, // 4MB
                 chunkHash = "",
-                telegramFileId = telegramFileId.trim(),
+                telegramFileId = telegramFileId,
                 uploaderBotToken = chunkToken
             )
         }

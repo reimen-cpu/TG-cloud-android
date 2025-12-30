@@ -66,12 +66,22 @@ private fun deleteExistingDownload(
     displayName: String,
     subfolder: String
 ) {
-    val selection = "${MediaStore.Downloads.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
-    val selectionArgs = arrayOf(displayName, "${Environment.DIRECTORY_DOWNLOADS}/${subfolder}/")
     try {
-        resolver.delete(MediaStore.Downloads.EXTERNAL_CONTENT_URI, selection, selectionArgs)
-    } catch (_: Exception) {
-        // Ignore
+        // Try to delete by display name only first (more reliable)
+        val selection1 = "${MediaStore.Downloads.DISPLAY_NAME} = ?"
+        val selectionArgs1 = arrayOf(displayName)
+        val deleted1 = resolver.delete(MediaStore.Downloads.EXTERNAL_CONTENT_URI, selection1, selectionArgs1)
+        
+        // Also try with path filter
+        val selection2 = "${MediaStore.Downloads.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+        val selectionArgs2 = arrayOf(displayName, "%${subfolder}%")
+        val deleted2 = resolver.delete(MediaStore.Downloads.EXTERNAL_CONTENT_URI, selection2, selectionArgs2)
+        
+        if (deleted1 > 0 || deleted2 > 0) {
+            Log.d(TAG, "Deleted existing file: $displayName (deleted=$deleted1+$deleted2)")
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "Failed to delete existing file: $displayName - ${e.message}")
     }
 }
 
