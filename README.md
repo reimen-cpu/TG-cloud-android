@@ -16,6 +16,7 @@ Android application to manage files in the cloud using Telegram as a backend. **
 - Minimum Android version: 8.0 (API 28)
 - Target Android version: 14 (API 34)
 - Requires a Telegram bot token and private channel for operation
+- Add multiple tokens (up to 5) for better performance
 
 ## 🚀 Main Features
 
