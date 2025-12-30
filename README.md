@@ -53,7 +53,7 @@ Android application to manage files in the cloud using Telegram as a backend. **
 </a>
 
 ### Option 2: Download APK
-Go to the [Release](https://github.com/reimen-cpu/TG-cloud-android/releases/tag/V1.0.0) section and download the latest version.
+Go to the [Release]([[https://github.com/reimen-cpu/TG-cloud-android/releases/tag/V1.2]) section and download the latest version.
 
 ### Option 3: Manual Compilation
 Follow the instructions below.
