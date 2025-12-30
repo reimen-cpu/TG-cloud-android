@@ -7,8 +7,6 @@
 
 # Telegram Cloud Android
 
-[![F-Droid](https://img.shields.io/f-droid/v/com.telegram.cloud.svg)](https://f-droid.org/packages/com.telegram.cloud/)
-
 Android application to manage files in the cloud using Telegram as a backend. **Your cloud, your rules.**
 
 ## ⚠️ IMPORTANT:
