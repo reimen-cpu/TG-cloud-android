@@ -7,7 +7,9 @@
 
 # Telegram Cloud Android
 
-Android application to manage files in the cloud using Telegram as a backend. **Your cloud, your rules.**
+Android application to manage files in the cloud using Telegram as a backend. **Your cloud, your rules 🚀.**
+
+
 
 ## ⚠️ IMPORTANT:
 
