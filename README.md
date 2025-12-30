@@ -53,15 +53,10 @@ This application has NO file size or storage limits.**
 
 ## 📦 Installation
 
-### Option 1: Install from F-Droid (Recommended)
-<a href="https://f-droid.org/packages/com.telegram.cloud/">
-    <img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png" alt="Get it on F-Droid" height="80">
-</a>
-
-### Option 2: Download APK
+### Option 1: Download APK
 Go to the [Releases](https://github.com/reimen-cpu/TG-cloud-android/releases/tag/V1.2) section and download the latest version.
 
-### Option 3: Manual Compilation
+### Option 2: Manual Compilation
 Follow the instructions below.
 
 ---
