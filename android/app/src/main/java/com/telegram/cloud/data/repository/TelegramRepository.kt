@@ -265,7 +265,8 @@ class TelegramRepository(
                 uploadedAt = System.currentTimeMillis(),
                 caption = request.caption,
                 shareLink = shareLink,
-                checksum = checksum
+                checksum = checksum,
+                uploaderTokens = selectedToken // Save the token used for upload!
             )
         )
         // Recargar archivos desde la base de datos inmediatamente (similar a LoadFiles en desktop)
@@ -611,41 +612,87 @@ class TelegramRepository(
         }
         Log.i(TAG, "downloadDirect: Using fileId from database: ${fileId.take(50)}...")
         
-        val token = cfg.tokens.randomOrNull() ?: cfg.tokens.first()
-        Log.i(TAG, "downloadDirect: Getting file info for fileId=${fileId.take(50)}...")
-        val fileResponse = botClient.getFile(token, fileId)
+        // Strategy: Try tokens until one works. Start with a random one for load balancing.
+        val allTokens = cfg.tokens
+        if (allTokens.isEmpty()) error("No configured bot tokens")
         
-        val totalBytes = fileResponse.fileSize ?: request.file.sizeBytes
-        Log.i(TAG, "downloadDirect: Total bytes=$totalBytes")
+        val primaryToken = allTokens.random()
+        val otherTokens = allTokens.filter { it != primaryToken }
+        // Sequence: primary -> all others
+        val tokenSequence = sequenceOf(primaryToken) + otherTokens.asSequence()
         
-        openDestinationOutputStream(destination, request.file.mimeType).use { output ->
-            botClient.downloadFile(
-                token = token,
-                filePath = fileResponse.filePath,
-                outputStream = output,
-                totalBytes = totalBytes,
-                onProgress = { bytesDownloaded, total ->
-                    val progress = if (total > 0) {
-                        (bytesDownloaded.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-                    } else {
-                        0f
-                    }
-                    val progressPercent = (progress * 100f).toInt()
-                    
-                    // Actualizar progreso en base de datos de forma asíncrona
-                    repositoryScope.launch {
-                        database.downloadTaskDao().getById(taskId)?.let {
-                            database.downloadTaskDao().update(it.copy(progress = progressPercent))
+        var successfulToken: String? = null
+        var lastError: Exception? = null
+        
+        for (token in tokenSequence) {
+            try {
+                Log.i(TAG, "downloadDirect: Trying with token=${token.take(20)}...")
+                
+                // 1. Get File Info (path)
+                val fileResponse = botClient.getFile(token, fileId)
+                
+                val totalBytes = fileResponse.fileSize ?: request.file.sizeBytes
+                Log.i(TAG, "downloadDirect: Total bytes=$totalBytes")
+                
+                // 2. Download Content
+                openDestinationOutputStream(destination, request.file.mimeType).use { output ->
+                    botClient.downloadFile(
+                        token = token,
+                        filePath = fileResponse.filePath,
+                        outputStream = output,
+                        totalBytes = totalBytes,
+                        onProgress = { bytesDownloaded, total ->
+                            val progress = if (total > 0) {
+                                (bytesDownloaded.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                            } else {
+                                0f
+                            }
+                            val progressPercent = (progress * 100f).toInt()
+                            
+                            // Actualizar progreso en base de datos de forma asíncrona
+                            repositoryScope.launch {
+                                database.downloadTaskDao().getById(taskId)?.let {
+                                    database.downloadTaskDao().update(it.copy(progress = progressPercent))
+                                }
+                            }
+                            
+                            // Emitir progreso al callback
+                            onProgress?.invoke(progress)
+                            
+                            // Log less frequently
+                            if (bytesDownloaded % (1024 * 1024) == 0L) { // Log every 1MB
+                                Log.d(TAG, "downloadDirect: Progress $bytesDownloaded/$total bytes (${progressPercent}%)")
+                            }
                         }
-                    }
-                    
-                    // Emitir progreso al callback
-                    onProgress?.invoke(progress)
-                    
-                    Log.d(TAG, "downloadDirect: Progress $bytesDownloaded/$total bytes (${progressPercent}%)")
+                    )
                 }
-            )
+                successfulToken = token
+                Log.i(TAG, "downloadDirect: Success with token=${token.take(20)}...")
+                break // Exit loop on success
+                
+            } catch (e: Exception) {
+                lastError = e
+                val isWrongFileId = e.message?.contains("Bad Request: wrong file_id") == true ||
+                                    e.message?.contains("file is temporarily unavailable") == true ||
+                                    e.message?.contains("400") == true
+                
+                if (isWrongFileId) {
+                    Log.w(TAG, "downloadDirect: Token ${token.take(20)}... failed with wrong file_id/unavailable. Trying next token.")
+                    continue
+                } else {
+                    // Other errors (network, etc) might not be solvable by switching token, 
+                    // but simple retry is safer. For now, let's try other tokens anyway 
+                    // just in case it's a weird bot-specific accessibility issue.
+                    Log.w(TAG, "downloadDirect: Token ${token.take(20)}... failed: ${e.message}. Trying next token.")
+                }
+            }
         }
+        
+        if (successfulToken == null) {
+            Log.e(TAG, "downloadDirect: All tokens failed. Last error: ${lastError?.message}")
+            throw lastError ?: Exception("Download failed with all tokens")
+        }
+
         Log.i(TAG, "downloadDirect: File saved to ${destination.absolutePath}")
         moveFileToDownloads(
             context = context,

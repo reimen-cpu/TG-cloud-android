@@ -98,7 +98,7 @@ class ChunkedDownloadManager(
                     try {
                         // Round-robin: assign token based on chunk index (same as desktop)
                         val token = tokens[index % tokens.size]
-                        val chunkData = downloadSingleChunk(fileId, token)
+                        val chunkData = downloadSingleChunk(fileId, token, tokens)
                         
                         if (chunkData != null) {
                             // Save chunk to disk immediately
@@ -143,7 +143,7 @@ class ChunkedDownloadManager(
                         try {
                             val fileId = chunkFileIds[index]
                             val token = tokens[index % tokens.size]
-                            val chunkData = downloadSingleChunk(fileId, token)
+                            val chunkData = downloadSingleChunk(fileId, token, tokens)
                             
                             if (chunkData != null) {
                                 synchronized(chunkDataMap) {
@@ -241,71 +241,95 @@ class ChunkedDownloadManager(
     
     private suspend fun downloadSingleChunk(
         fileId: String,
-        token: String,
+        assignedToken: String,
+        allTokens: List<String>,
         maxRetries: Int = 5
     ): ByteArray? {
-        var lastError: Exception? = null
         
-        repeat(maxRetries) { attempt ->
-            try {
-                if (attempt > 0) {
-                    // Exponential backoff: 1s, 2s, 4s, 8s, 16s
-                    val delayMs = (1000L * (1 shl (attempt - 1)))
-                    Log.d(TAG, "Retry $attempt for chunk, waiting ${delayMs}ms...")
-                    delay(delayMs)
-                }
-                
-                Log.d(TAG, "Downloading chunk with fileId=${fileId.take(20)}... (attempt ${attempt + 1})")
-                
-                // Get file path from Telegram
-                val telegramFile = botClient.getFile(token, fileId)
-                
-                // Download the file content
-                val data = botClient.downloadFileToBytes(token, telegramFile.filePath)
-                
-                if (data != null && data.isNotEmpty()) {
-                    return data
-                }
-                
-            } catch (e: Exception) {
-                lastError = e
-                
-                // Determine if error is recoverable
-                val isRecoverable = when (e) {
-                    is java.io.IOException, is java.net.SocketTimeoutException -> true
-                    else -> {
-                        // Check for specific HTTP error codes in message
-                        val message = e.message ?: ""
-                        when {
-                            message.contains("429") -> true // Rate limit
-                            message.contains("500") -> true // Internal server error
-                            message.contains("502") -> true // Bad gateway
-                            message.contains("503") -> true // Service unavailable
-                            message.contains("504") -> true // Gateway timeout
-                            message.contains("400") -> false // Bad request
-                            message.contains("401") -> false // Unauthorized
-                            message.contains("403") -> false // Forbidden
-                            message.contains("404") -> false // Not found
-                            else -> false
+        // Define the sequence of tokens to try: assigned token first, then others
+        val otherTokens = allTokens.filter { it != assignedToken }
+        val tokenSequence = sequenceOf(assignedToken) + otherTokens.asSequence()
+        
+        for (token in tokenSequence) {
+            var lastError: Exception? = null
+            var success = false
+            
+            // Try up to maxRetries for THIS token (for network errors)
+            // But if we get a 400/Wrong File ID, we switch tokens immediately
+            repeat(maxRetries) { attempt ->
+                try {
+                    if (attempt > 0) {
+                        // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+                        val delayMs = (1000L * (1 shl (attempt - 1)))
+                        Log.d(TAG, "Retry $attempt for chunk (token=${token.take(10)}...), waiting ${delayMs}ms...")
+                        delay(delayMs)
+                    }
+                    
+                    Log.d(TAG, "Downloading chunk with fileId=${fileId.take(20)}... token=${token.take(10)}... (attempt ${attempt + 1})")
+                    
+                    // Get file path from Telegram
+                    val telegramFile = botClient.getFile(token, fileId)
+                    
+                    // Download the file content
+                    val data = botClient.downloadFileToBytes(token, telegramFile.filePath)
+                    
+                    if (data != null && data.isNotEmpty()) {
+                        return data
+                    }
+                    
+                } catch (e: Exception) {
+                    lastError = e
+                    
+                    // Check for "Wrong File ID" or "Unavailable" logic
+                    val isWrongFileId = e.message?.contains("Bad Request: wrong file_id") == true ||
+                                        e.message?.contains("file is temporarily unavailable") == true ||
+                                        e.message?.contains("400") == true
+                    
+                    if (isWrongFileId) {
+                        Log.w(TAG, "Chunk download: Token ${token.take(10)}... failed with wrong file_id/unavailable. Breaking retry loop to try next token.")
+                        return@repeat // Break the retry loop for THIS token, proceed to next token in sequence
+                    }
+                    
+                    // Determine if error is recoverable (network issues)
+                    val isRecoverable = when (e) {
+                        is java.io.IOException, is java.net.SocketTimeoutException -> true
+                        else -> {
+                            // Check for specific HTTP error codes in message
+                            val message = e.message ?: ""
+                            when {
+                                message.contains("429") -> true // Rate limit
+                                message.contains("500") -> true // Internal server error
+                                message.contains("502") -> true // Bad gateway
+                                message.contains("503") -> true // Service unavailable
+                                message.contains("504") -> true // Gateway timeout
+                                else -> false
+                            }
                         }
                     }
-                }
-                
-                if (!isRecoverable) {
-                    Log.e(TAG, "Chunk download: Non-recoverable error, not retrying", e)
-                    return null
-                }
-                
-                Log.w(TAG, "Chunk download attempt ${attempt + 1}/$maxRetries failed: ${e.message}")
-                
-                if (attempt == maxRetries - 1) {
-                    Log.e(TAG, "Chunk download: Failed after $maxRetries attempts", e)
-                    return null
+                    
+                    if (!isRecoverable) {
+                        Log.e(TAG, "Chunk download: Non-recoverable error with token ${token.take(10)}..., not retrying this token", e)
+                        return@repeat // Break, try next token? Or assume fatal?
+                        // If it's 401/403 (Unauthorized/Forbidden), maybe that specific token is bad. Try others.
+                        // If it's 404 (Not Found), maybe file_id is wrong for this token. Try others.
+                    }
+                    
+                    Log.w(TAG, "Chunk download attempt ${attempt + 1}/$maxRetries failed with token ${token.take(10)}...: ${e.message}")
+                    
+                    if (attempt == maxRetries - 1) {
+                        Log.e(TAG, "Chunk download: Failed after $maxRetries attempts with token ${token.take(10)}...", e)
+                    }
                 }
             }
+            
+            // If we are here, it means we exhausted retries for 'token' OR we broke out due to 400/WrongID
+            // Check if we should try the next token
+            // We assume that if we returned valid data, we wouldn't be here (return statement inside try)
+            
+            Log.w(TAG, "Chunk download failed with token ${token.take(10)}... Moving to next token if available.")
         }
         
-        Log.e(TAG, "Failed to download chunk after $maxRetries attempts", lastError)
+        Log.e(TAG, "Failed to download chunk with ALL tokens.")
         return null
     }
     
