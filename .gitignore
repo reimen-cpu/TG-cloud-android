@@ -51,6 +51,7 @@ obj/
 *.jks
 *.keystore
 key.properties
+android/gradle.properties
 
 # Google Services (Firebase, etc.)
 google-services.json
