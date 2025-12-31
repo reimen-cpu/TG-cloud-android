@@ -174,15 +174,27 @@ class BackupManager(
                 "Backup inválido: faltan tokens o channel id (tokens=${tokens.size}, channel=${channel.isNotBlank()})"
             }
 
+            // Extract sync configuration if present
+            val syncChannelId = envMap["SYNC_CHANNEL_ID"]
+            val syncBotToken = envMap["SYNC_BOT_TOKEN"]
+            val syncPassword = envMap["SYNC_PASSWORD"]
+            
+            if (!syncChannelId.isNullOrBlank()) {
+                Log.i(TAG, "restoreBackup: Found sync config - channelId=${syncChannelId.take(20)}...")
+            }
+
             Log.i(TAG, "restoreBackup: Saving config...")
             configStore.save(
                 BotConfig(
                     tokens = tokens,
                     channelId = channel,
-                    chatId = envMap["CHAT_ID"]
+                    chatId = envMap["CHAT_ID"],
+                    syncChannelId = syncChannelId,
+                    syncBotToken = syncBotToken,
+                    syncPassword = syncPassword
                 )
             )
-            Log.i(TAG, "restoreBackup: Config saved")
+            Log.i(TAG, "restoreBackup: Config saved (including sync config)")
 
             // Migrate desktop database to Android format
             val tempDbPath = File(cacheDir, "temp_restore.db")
@@ -834,6 +846,18 @@ class BackupManager(
         config.chatId?.takeIf { it.isNotBlank() }?.let {
             builder.append("CHAT_ID=").append(it).append("\n")
         }
+        
+        // Add sync configuration fields
+        config.syncChannelId?.takeIf { it.isNotBlank() }?.let {
+            builder.append("SYNC_CHANNEL_ID=").append(it).append("\n")
+        }
+        config.syncBotToken?.takeIf { it.isNotBlank() }?.let {
+            builder.append("SYNC_BOT_TOKEN=").append(it).append("\n")
+        }
+        config.syncPassword?.takeIf { it.isNotBlank() }?.let {
+            builder.append("SYNC_PASSWORD=").append(it).append("\n")
+        }
+        
         return builder.toString()
     }
 

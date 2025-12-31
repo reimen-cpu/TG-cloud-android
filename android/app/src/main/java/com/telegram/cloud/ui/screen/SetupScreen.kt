@@ -31,6 +31,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -42,6 +44,9 @@ import com.telegram.cloud.ui.components.AnimatedButton
 import com.telegram.cloud.ui.theme.Spacing
 import com.telegram.cloud.ui.theme.ComponentSize
 import com.telegram.cloud.ui.utils.HapticFeedbackType
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Sync
 
 @Composable
 fun SetupScreen(
@@ -49,13 +54,22 @@ fun SetupScreen(
     initialTokens: List<String> = emptyList(),
     initialChannelId: String? = null,
     initialChatId: String? = null,
-    onSave: (tokens: List<String>, channelId: String, chatId: String?) -> Unit,
+    initialSyncChannelId: String? = null,
+    initialSyncBotToken: String? = null,
+    initialSyncPassword: String? = null,
+    onSave: (tokens: List<String>, channelId: String, chatId: String?, syncChannelId: String?, syncBotToken: String?, syncPassword: String?) -> Unit,
     onImportBackup: (() -> Unit)? = null,
     onCancel: (() -> Unit)? = null
 ) {
     val tokens = remember { mutableStateListOf("", "", "", "", "") }
     val channelId = remember { androidx.compose.runtime.mutableStateOf(initialChannelId.orEmpty()) }
     val chatId = remember { androidx.compose.runtime.mutableStateOf(initialChatId.orEmpty()) }
+    
+    // Sync configuration state
+    var showSyncConfig by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var syncChannelIdState by remember { androidx.compose.runtime.mutableStateOf(initialSyncChannelId.orEmpty()) }
+    var syncBotTokenState by remember { androidx.compose.runtime.mutableStateOf(initialSyncBotToken.orEmpty()) }
+    var syncPasswordState by remember { androidx.compose.runtime.mutableStateOf(initialSyncPassword.orEmpty()) }
 
     androidx.compose.runtime.LaunchedEffect(initialTokens) {
         initialTokens.take(5).forEachIndexed { index, value ->
@@ -176,10 +190,110 @@ fun SetupScreen(
             shape = MaterialTheme.shapes.medium,
             textStyle = MaterialTheme.typography.bodyMedium
         )
+        
+        // Database Sync Configuration (Collapsible Section)
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        TextButton(
+            onClick = { showSyncConfig = !showSyncConfig },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(
+                imageVector = Icons.Default.Sync,
+                contentDescription = null,
+                modifier = Modifier.size(ComponentSize.iconSmall)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.sync_config_title),
+                style = MaterialTheme.typography.labelLarge
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            Icon(
+                imageVector = if (showSyncConfig) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = null
+            )
+        }
+        
+        AnimatedVisibility(
+            visible = showSyncConfig,
+            enter = fadeIn() + slideInVertically(),
+            exit = fadeOut() + slideOutVertically()
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(Spacing.screenPadding)
+            ) {
+                Text(
+                    text = stringResource(R.string.sync_config_description),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                val isSyncChannelValid = syncChannelIdState.isBlank() || syncChannelIdState.startsWith("-")
+                OutlinedTextField(
+                    value = syncChannelIdState,
+                    onValueChange = { newValue: String -> syncChannelIdState = newValue },
+                    label = { Text(stringResource(R.string.sync_channel_id)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = if (isSyncChannelValid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        cursorColor = MaterialTheme.colorScheme.primary
+                    ),
+                    shape = MaterialTheme.shapes.medium,
+                    textStyle = MaterialTheme.typography.bodyMedium
+                )
+                
+                OutlinedTextField(
+                    value = syncBotTokenState,
+                    onValueChange = { newValue: String -> syncBotTokenState = newValue },
+                    label = { Text(stringResource(R.string.sync_bot_token)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = PasswordVisualTransformation(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        cursorColor = MaterialTheme.colorScheme.primary
+                    ),
+                    shape = MaterialTheme.shapes.medium,
+                    textStyle = MaterialTheme.typography.bodyMedium
+                )
+                
+                OutlinedTextField(
+                    value = syncPasswordState,
+                    onValueChange = { newValue: String -> syncPasswordState = newValue },
+                    label = { Text(stringResource(R.string.sync_password)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = PasswordVisualTransformation(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        cursorColor = MaterialTheme.colorScheme.primary
+                    ),
+                    shape = MaterialTheme.shapes.medium,
+                    textStyle = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
 
         AnimatedButton(
             enabled = isValid,
-            onClick = { onSave(tokens.filter { it.isNotBlank() }, channelId.value, chatId.value.ifBlank { null }) },
+            onClick = { 
+                onSave(
+                    tokens.filter { it.isNotBlank() }, 
+                    channelId.value, 
+                    chatId.value.ifBlank { null },
+                    syncChannelIdState.ifBlank { null },
+                    syncBotTokenState.ifBlank { null },
+                    syncPasswordState.ifBlank { null }
+                ) 
+            },
             modifier = Modifier.fillMaxWidth().height(ComponentSize.buttonHeight),
             hapticType = HapticFeedbackType.MEDIUM_CLICK
         ) {

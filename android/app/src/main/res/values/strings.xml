@@ -68,6 +68,13 @@
     <string name="save">Save</string>
     <string name="import_backup">Import backup</string>
     
+    <!-- Sync Configuration -->
+    <string name="sync_config_title">Database Sync (Optional)</string>
+    <string name="sync_config_description">Configure database synchronization to share data across devices using encrypted logs stored in a Telegram channel.</string>
+    <string name="sync_channel_id">Sync Channel ID (-100…)</string>
+    <string name="sync_bot_token">Sync Bot Token</string>
+    <string name="sync_password">Sync Password (encryption key)</string>
+    
     <!-- Errors and messages -->
     <string name="upload_success">Upload completed</string>
     <string name="upload_failed">Upload failed</string>

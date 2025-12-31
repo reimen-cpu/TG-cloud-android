@@ -35,6 +35,11 @@ import java.io.File
 import android.webkit.MimeTypeMap
 import com.telegram.cloud.utils.moveFileToDownloads
 import com.telegram.cloud.R
+import com.telegram.cloud.data.sync.SyncConfig
+import com.telegram.cloud.data.sync.SyncEngine
+import com.telegram.cloud.data.sync.SyncLogManager
+import com.telegram.cloud.data.sync.ConflictResolver
+import com.telegram.cloud.data.remote.TelegramBotClient
 
 data class DashboardState(
     val files: List<CloudFile> = emptyList(),
@@ -69,8 +74,10 @@ class MainViewModel(
     private val _currentFileName = MutableStateFlow<String?>(null)
     private val _configLoaded = MutableStateFlow(false)
     private val _events = MutableSharedFlow<UiEvent>()
+    private val _isSyncing = MutableStateFlow(false)
 
     val events = _events.asSharedFlow()
+    val isSyncing: StateFlow<Boolean> = _isSyncing
     
     init {
         // Mark config as loaded after first emission
@@ -91,6 +98,9 @@ class MainViewModel(
             } catch (e: Exception) {
                 Log.e("MainViewModel", "Error detecting incomplete tasks", e)
             }
+            
+            // Perform database sync on app startup
+            performSync()
         }
         // Track task queue progress to keep dashboard progress bars updated
         viewModelScope.launch {
@@ -168,10 +178,24 @@ class MainViewModel(
         }
     }
 
-    fun saveConfig(tokens: List<String>, channelId: String, chatId: String?) {
+    fun saveConfig(
+        tokens: List<String>, 
+        channelId: String, 
+        chatId: String?,
+        syncChannelId: String? = null,
+        syncBotToken: String? = null,
+        syncPassword: String? = null
+    ) {
         viewModelScope.launch {
             repository.saveConfig(
-                BotConfig(tokens = tokens.filter { it.isNotBlank() }, channelId = channelId, chatId = chatId)
+                BotConfig(
+                    tokens = tokens.filter { it.isNotBlank() }, 
+                    channelId = channelId, 
+                    chatId = chatId,
+                    syncChannelId = syncChannelId,
+                    syncBotToken = syncBotToken,
+                    syncPassword = syncPassword
+                )
             )
         }
     }
@@ -249,11 +273,91 @@ class MainViewModel(
         backupManager.requiresPassword(file)
     
     /**
-     * Refrescar la lista de archivos forzando actualización del Flow
+     * Refrescar la lista de archivos forzando actualización del Flow.
+     * Also triggers database sync on pull-to-refresh.
      */
     fun refreshFiles() {
         viewModelScope.launch {
+            // First perform sync to get latest changes from other devices
+            performSync()
+            // Then refresh file list
             repository.refreshFiles()
+        }
+    }
+    
+    /**
+     * Performs database synchronization:
+     * 1. Downloads new sync logs from the sync channel
+     * 2. Applies remote logs to local database
+     * 3. Uploads any pending local logs
+     */
+    fun performSync() {
+        if (_isSyncing.value) {
+            Log.d("MainViewModel", "performSync: Already syncing, skipping")
+            return
+        }
+        
+        viewModelScope.launch {
+            try {
+                val cfg = repository.config.first() ?: return@launch
+                
+                // Check if sync is configured
+                val syncChannelId = cfg.syncChannelId
+                val syncBotToken = cfg.syncBotToken
+                val syncPassword = cfg.syncPassword
+                
+                if (syncChannelId.isNullOrBlank() || syncBotToken.isNullOrBlank() || syncPassword.isNullOrBlank()) {
+                    Log.d("MainViewModel", "performSync: Sync not configured, skipping")
+                    return@launch
+                }
+                
+                _isSyncing.value = true
+                Log.i("MainViewModel", "performSync: Starting sync cycle...")
+                
+                val syncConfig = SyncConfig(
+                    syncChannelId = syncChannelId,
+                    syncBotToken = syncBotToken,
+                    syncPassword = syncPassword,
+                    deviceId = SyncConfig.getDeviceId(context)
+                )
+                
+                if (!syncConfig.isValid()) {
+                    Log.d("MainViewModel", "performSync: Invalid sync config")
+                    _isSyncing.value = false
+                    return@launch
+                }
+                
+                // Get database access
+                val database = (context.applicationContext as com.telegram.cloud.TelegramCloudApp).container.database
+                
+                val syncLogManager = SyncLogManager(
+                    syncLogDao = database.syncLogDao(),
+                    syncMetadataDao = database.syncMetadataDao(),
+                    deviceId = syncConfig.deviceId
+                )
+                
+                val syncEngine = SyncEngine(
+                    context = context,
+                    telegramClient = TelegramBotClient(),
+                    syncLogManager = syncLogManager,
+                    conflictResolver = ConflictResolver(),
+                    syncConfig = syncConfig,
+                    database = database
+                )
+                
+                val result = syncEngine.performSync()
+                Log.i("MainViewModel", "performSync: Sync complete - uploaded=${result.uploadedCount}, downloaded=${result.downloadedCount}, applied=${result.appliedCount}")
+                
+                // Reload files if any changes were applied
+                if (result.appliedCount > 0) {
+                    repository.reloadFilesFromDatabase()
+                }
+                
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "performSync: Error during sync", e)
+            } finally {
+                _isSyncing.value = false
+            }
         }
     }
     

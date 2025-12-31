@@ -82,7 +82,7 @@ interface CloudFileDao {
     suspend fun getByFileId(fileId: String): CloudFileEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(file: CloudFileEntity)
+    suspend fun insert(file: CloudFileEntity): Long
 
     @Query("DELETE FROM cloud_files WHERE id = :id")
     suspend fun deleteById(id: Long)
@@ -151,16 +151,25 @@ class StatusConverters {
 }
 
 @Database(
-    entities = [CloudFileEntity::class, UploadTaskEntity::class, DownloadTaskEntity::class, com.telegram.cloud.gallery.GalleryMediaEntity::class],
-    version = 5,
+    entities = [
+        CloudFileEntity::class, 
+        UploadTaskEntity::class, 
+        DownloadTaskEntity::class, 
+        com.telegram.cloud.gallery.GalleryMediaEntity::class,
+        com.telegram.cloud.data.sync.SyncLogEntity::class,
+        com.telegram.cloud.data.sync.SyncMetadataEntity::class
+    ],
+    version = 6,
     exportSchema = false
 )
-@androidx.room.TypeConverters(StatusConverters::class)
+@androidx.room.TypeConverters(StatusConverters::class, com.telegram.cloud.data.sync.SyncOperationConverter::class)
 abstract class CloudDatabase : androidx.room.RoomDatabase() {
     abstract fun cloudFileDao(): CloudFileDao
     abstract fun uploadTaskDao(): UploadTaskDao
     abstract fun downloadTaskDao(): DownloadTaskDao
     abstract fun galleryMediaDao(): com.telegram.cloud.gallery.GalleryMediaDao
+    abstract fun syncLogDao(): com.telegram.cloud.data.sync.SyncLogDao
+    abstract fun syncMetadataDao(): com.telegram.cloud.data.sync.SyncMetadataDao
     
     fun invalidateAllTables() {
         invalidationTracker.refreshVersionsAsync()
@@ -185,7 +194,8 @@ abstract class CloudDatabase : androidx.room.RoomDatabase() {
                     MIGRATION_1_2,
                     MIGRATION_2_3,
                     MIGRATION_3_4,
-                    MIGRATION_4_5
+                    MIGRATION_4_5,
+                    MIGRATION_5_6
                 ).addCallback(object : androidx.room.RoomDatabase.Callback() {
                     override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                         super.onCreate(db)
@@ -285,6 +295,41 @@ abstract class CloudDatabase : androidx.room.RoomDatabase() {
                 db.execSQL("ALTER TABLE download_tasks ADD COLUMN chunk_file_ids TEXT DEFAULT NULL")
                 db.execSQL("ALTER TABLE download_tasks ADD COLUMN temp_chunk_dir TEXT DEFAULT NULL")
                 db.execSQL("ALTER TABLE download_tasks ADD COLUMN total_chunks INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+        
+        val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                android.util.Log.i("CloudDatabase", "Running migration 5->6: Adding sync tables")
+                
+                // Create sync_logs table
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS sync_logs (
+                        log_id TEXT PRIMARY KEY NOT NULL,
+                        timestamp INTEGER NOT NULL,
+                        device_id TEXT NOT NULL,
+                        operation TEXT NOT NULL,
+                        table_name TEXT NOT NULL,
+                        primary_key TEXT NOT NULL,
+                        data_json TEXT,
+                        previous_data_json TEXT,
+                        is_uploaded INTEGER NOT NULL DEFAULT 0,
+                        telegram_message_id INTEGER,
+                        checksum TEXT
+                    )
+                """)
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_logs_timestamp ON sync_logs(timestamp)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_logs_is_uploaded ON sync_logs(is_uploaded)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_logs_device_id ON sync_logs(device_id)")
+                
+                // Create sync_metadata table
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS sync_metadata (
+                        key TEXT PRIMARY KEY NOT NULL,
+                        value TEXT NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    )
+                """)
             }
         }
     }

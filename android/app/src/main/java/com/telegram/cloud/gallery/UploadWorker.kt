@@ -13,6 +13,8 @@ import com.telegram.cloud.domain.model.UploadRequest
 import com.telegram.cloud.TelegramCloudApp
 import com.telegram.cloud.tasks.TaskQueueManager
 import com.telegram.cloud.utils.ResourceGuard
+import com.telegram.cloud.data.sync.SyncLogManager
+import com.telegram.cloud.data.sync.SyncConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,10 +61,15 @@ class UploadWorker(
                 return Result.failure()
             }
             
-            // Get database and repository
+            // Get database and repository with SyncLogManager
             val database = CloudDatabase.getDatabase(context)
             val botClient = com.telegram.cloud.data.remote.TelegramBotClient()
-            val repository = TelegramRepository(context, configStore, database, botClient)
+            val syncLogManager = SyncLogManager(
+                syncLogDao = database.syncLogDao(),
+                syncMetadataDao = database.syncMetadataDao(),
+                deviceId = SyncConfig.getDeviceId(context)
+            )
+            val repository = TelegramRepository(context, configStore, database, botClient, syncLogManager)
             // Set initial foreground info
             setForeground(
                 SyncNotificationManager.createForegroundInfo(

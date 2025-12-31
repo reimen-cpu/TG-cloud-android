@@ -52,6 +52,11 @@ import com.telegram.cloud.utils.moveFileToDownloads
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.telegram.cloud.data.remote.ChunkInfo
+import com.telegram.cloud.data.sync.SyncLogManager
+import com.telegram.cloud.data.sync.SyncOperation
+import com.telegram.cloud.data.sync.SyncConfig
+import com.telegram.cloud.data.sync.SyncEngine
+import com.telegram.cloud.data.sync.ConflictResolver
 
 private const val TAG = "TelegramRepository"
 
@@ -61,7 +66,8 @@ class TelegramRepository(
     private val context: Context,
     private val configStore: ConfigStore,
     private val database: CloudDatabase,
-    private val botClient: TelegramBotClient
+    private val botClient: TelegramBotClient,
+    private val syncLogManager: SyncLogManager? = null // Optional sync log manager
 ) {
     private val chunkedUploadManager = ChunkedUploadManager(botClient, context.contentResolver)
     private val chunkedDownloadManager = ChunkedDownloadManager(botClient)
@@ -112,6 +118,144 @@ class TelegramRepository(
     // Método para forzar actualización del cache (similar a OnRefresh en desktop)
     suspend fun refreshFiles() {
         reloadFilesFromDatabase()
+    }
+    
+    /**
+     * Generates a sync log entry for a CloudFileEntity operation.
+     * Only generates if sync is configured and syncLogManager is available.
+     */
+    private suspend fun generateSyncLogForInsert(entity: CloudFileEntity) {
+        if (syncLogManager == null) {
+            Log.d(TAG, "generateSyncLogForInsert: SyncLogManager not configured, skipping")
+            return
+        }
+        
+        try {
+            // Convert entity to map for sync log
+            val dataMap = mapOf(
+                "id" to entity.id,
+                "telegramMessageId" to entity.telegramMessageId,
+                "fileId" to entity.fileId,
+                "fileUniqueId" to entity.fileUniqueId,
+                "fileName" to entity.fileName,
+                "mimeType" to entity.mimeType,
+                "sizeBytes" to entity.sizeBytes,
+                "uploadedAt" to entity.uploadedAt,
+                "caption" to entity.caption,
+                "shareLink" to entity.shareLink,
+                "checksum" to entity.checksum,
+                "uploaderTokens" to entity.uploaderTokens
+            )
+            
+            syncLogManager.logOperation(
+                operation = SyncOperation.INSERT,
+                tableName = "cloud_files",
+                primaryKey = entity.id.toString(),
+                data = dataMap,
+                previousData = null
+            )
+            Log.i(TAG, "generateSyncLogForInsert: Created sync log for file ${entity.fileName}")
+            
+            // Trigger immediate upload of sync logs
+            triggerSyncUpload()
+        } catch (e: Exception) {
+            // Don't fail the upload if sync log fails
+            Log.e(TAG, "generateSyncLogForInsert: Failed to create sync log", e)
+        }
+    }
+    
+    /**
+     * Triggers immediate upload of pending sync logs to the sync channel.
+     * Only uploads if sync configuration is available and valid.
+     */
+    private suspend fun triggerSyncUpload() {
+        try {
+            val cfg = config.first() ?: return
+            
+            // Check if sync is configured
+            val syncChannelId = cfg.syncChannelId
+            val syncBotToken = cfg.syncBotToken
+            val syncPassword = cfg.syncPassword
+            
+            if (syncChannelId.isNullOrBlank() || syncBotToken.isNullOrBlank() || syncPassword.isNullOrBlank()) {
+                Log.d(TAG, "triggerSyncUpload: Sync not configured, skipping upload")
+                return
+            }
+            
+            Log.i(TAG, "triggerSyncUpload: Sync config found, uploading pending logs...")
+            
+            val syncConfig = SyncConfig(
+                syncChannelId = syncChannelId,
+                syncBotToken = syncBotToken,
+                syncPassword = syncPassword,
+                deviceId = SyncConfig.getDeviceId(context)
+            )
+            
+            if (!syncConfig.isValid()) {
+                Log.d(TAG, "triggerSyncUpload: Invalid sync config, skipping")
+                return
+            }
+            
+            val syncEngine = SyncEngine(
+                context = context,
+                telegramClient = botClient,
+                syncLogManager = syncLogManager!!,
+                conflictResolver = ConflictResolver(),
+                syncConfig = syncConfig,
+                database = database
+            )
+            
+            val result = syncEngine.uploadPendingLogs()
+            if (result.isSuccess) {
+                Log.i(TAG, "triggerSyncUpload: Uploaded ${result.getOrDefault(0)} pending logs")
+            } else {
+                Log.e(TAG, "triggerSyncUpload: Upload failed", result.exceptionOrNull())
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "triggerSyncUpload: Error during sync upload", e)
+        }
+    }
+    
+    /**
+     * Generates a sync log entry for file deletion.
+     */
+    private suspend fun generateSyncLogForDelete(entity: CloudFileEntity) {
+        if (syncLogManager == null) {
+            Log.d(TAG, "generateSyncLogForDelete: SyncLogManager not configured, skipping")
+            return
+        }
+        
+        try {
+            // Convert entity to map for previousData
+            val previousDataMap = mapOf(
+                "id" to entity.id,
+                "telegramMessageId" to entity.telegramMessageId,
+                "fileId" to entity.fileId,
+                "fileUniqueId" to entity.fileUniqueId,
+                "fileName" to entity.fileName,
+                "mimeType" to entity.mimeType,
+                "sizeBytes" to entity.sizeBytes,
+                "uploadedAt" to entity.uploadedAt,
+                "caption" to entity.caption,
+                "shareLink" to entity.shareLink,
+                "checksum" to entity.checksum,
+                "uploaderTokens" to entity.uploaderTokens
+            )
+            
+            syncLogManager.logOperation(
+                operation = SyncOperation.DELETE,
+                tableName = "cloud_files",
+                primaryKey = entity.id.toString(),
+                data = null,
+                previousData = previousDataMap
+            )
+            Log.i(TAG, "generateSyncLogForDelete: Created sync log for deleted file ${entity.fileName}")
+            
+            // Trigger immediate upload of sync logs
+            triggerSyncUpload()
+        } catch (e: Exception) {
+            Log.e(TAG, "generateSyncLogForDelete: Failed to create sync log", e)
+        }
     }
 
     suspend fun saveConfig(config: BotConfig) = configStore.save(config)
@@ -254,21 +398,26 @@ class TelegramRepository(
         val shareLink = buildShareLink(cfg.channelId, message.messageId)
         Log.i(TAG, "uploadDirect: ShareLink=$shareLink")
 
-        database.cloudFileDao().insert(
-            CloudFileEntity(
-                telegramMessageId = message.messageId,
-                fileId = document.fileId,
-                fileUniqueId = document.fileUniqueId,
-                fileName = document.fileName ?: request.displayName,
-                mimeType = document.mimeType ?: mimeType,
-                sizeBytes = document.fileSize ?: request.sizeBytes,
-                uploadedAt = System.currentTimeMillis(),
-                caption = request.caption,
-                shareLink = shareLink,
-                checksum = checksum,
-                uploaderTokens = selectedToken // Save the token used for upload!
-            )
+        val entityToInsert = CloudFileEntity(
+            telegramMessageId = message.messageId,
+            fileId = document.fileId,
+            fileUniqueId = document.fileUniqueId,
+            fileName = document.fileName ?: request.displayName,
+            mimeType = document.mimeType ?: mimeType,
+            sizeBytes = document.fileSize ?: request.sizeBytes,
+            uploadedAt = System.currentTimeMillis(),
+            caption = request.caption,
+            shareLink = shareLink,
+            checksum = checksum,
+            uploaderTokens = selectedToken // Save the token used for upload!
         )
+        
+        val insertedId = database.cloudFileDao().insert(entityToInsert)
+        
+        // Generate sync log for the INSERT operation
+        val insertedEntity = entityToInsert.copy(id = insertedId)
+        generateSyncLogForInsert(insertedEntity)
+        
         // Recargar archivos desde la base de datos inmediatamente (similar a LoadFiles en desktop)
         reloadFilesFromDatabase()
         Log.i(TAG, "uploadDirect: File saved to database and cache reloaded")
@@ -428,21 +577,26 @@ class TelegramRepository(
         // Store message IDs in caption for deletion (after [CHUNKED:N])
         val allMessageIds = result.messageIds.joinToString(",")
         
-        database.cloudFileDao().insert(
-            CloudFileEntity(
-                telegramMessageId = firstMessageId,
-                fileId = result.fileId, // UUID for chunked file
-                fileUniqueId = allTelegramFileIds, // Store telegram file IDs for download
-                fileName = request.displayName,
-                mimeType = mimeType,
-                sizeBytes = request.sizeBytes,
-                uploadedAt = System.currentTimeMillis(),
-                caption = "[CHUNKED:${result.totalChunks}|$allMessageIds] ${request.caption ?: ""}",
-                shareLink = shareLink,
-                checksum = checksum,
-                uploaderTokens = allUploaderTokens // Store bot tokens per chunk for sharing
-            )
+        val chunkedEntityToInsert = CloudFileEntity(
+            telegramMessageId = firstMessageId,
+            fileId = result.fileId, // UUID for chunked file
+            fileUniqueId = allTelegramFileIds, // Store telegram file IDs for download
+            fileName = request.displayName,
+            mimeType = mimeType,
+            sizeBytes = request.sizeBytes,
+            uploadedAt = System.currentTimeMillis(),
+            caption = "[CHUNKED:${result.totalChunks}|$allMessageIds] ${request.caption ?: ""}",
+            shareLink = shareLink,
+            checksum = checksum,
+            uploaderTokens = allUploaderTokens // Store bot tokens per chunk for sharing
         )
+        
+        val insertedChunkedId = database.cloudFileDao().insert(chunkedEntityToInsert)
+        
+        // Generate sync log for the INSERT operation (chunked file)
+        val insertedChunkedEntity = chunkedEntityToInsert.copy(id = insertedChunkedId)
+        generateSyncLogForInsert(insertedChunkedEntity)
+        
         // Recargar archivos desde la base de datos inmediatamente (similar a LoadFiles en desktop)
         reloadFilesFromDatabase()
         Log.i(TAG, "uploadChunked: Chunked file record saved to database and cache reloaded")
@@ -896,6 +1050,11 @@ class TelegramRepository(
                 val deleted = botClient.deleteMessage(token, cfg.channelId, entity.telegramMessageId)
                 Log.i(TAG, "deleteFile: Telegram delete result: $deleted")
             }
+        }
+        
+        // Generate sync log for DELETE operation before deleting from database
+        if (entity != null) {
+            generateSyncLogForDelete(entity)
         }
         
         // Always delete from local database

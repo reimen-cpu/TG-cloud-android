@@ -70,7 +70,8 @@ private class TokenRateLimiter(
 
 data class TelegramMessage(
     val messageId: Long,
-    val document: TelegramDocument?
+    val document: TelegramDocument?,
+    val caption: String? = null
 )
 
 data class TelegramDocument(
@@ -511,6 +512,247 @@ class TelegramBotClient(
         }
 
     /**
+     * Gets messages from a sync channel for database synchronization.
+     * Uses getUpdates API to fetch recent messages containing sync logs.
+     * 
+     * @param token Bot token
+     * @param channelId Channel ID to read from
+     * @param afterMessageId Only get messages after this update_id (for getUpdates offset)
+     * @return List of messages from the channel
+     */
+    suspend fun getSyncMessages(
+        token: String,
+        channelId: String,
+        afterMessageId: Long? = null
+    ): List<TelegramMessage> = withContext(Dispatchers.IO) {
+        try {
+            Log.i(TAG, "getSyncMessages: channelId=$channelId, afterUpdateId=$afterMessageId")
+            
+            // Use getUpdates to get channel posts
+            // Note: The bot must be added to the channel as admin to receive updates
+            val url = "https://api.telegram.org/bot$token/getUpdates"
+            
+            val formBody = okhttp3.FormBody.Builder()
+                .add("allowed_updates", "[\"channel_post\"]")
+                .add("limit", "100")
+                .add("timeout", "5")
+            
+            // offset is update_id, not message_id
+            if (afterMessageId != null && afterMessageId > 0) {
+                formBody.add("offset", (afterMessageId + 1).toString())
+                Log.d(TAG, "getSyncMessages: Using offset ${afterMessageId + 1}")
+            }
+            
+            val request = Request.Builder()
+                .url(url)
+                .post(formBody.build())
+                .build()
+            
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string() ?: return@withContext emptyList()
+                Log.d(TAG, "getSyncMessages: Response code=${response.code}")
+                
+                if (!response.isSuccessful) {
+                    Log.e(TAG, "getSyncMessages: Failed: $body")
+                    return@withContext emptyList()
+                }
+                
+                val json = JSONObject(body)
+                if (!json.optBoolean("ok")) {
+                    Log.e(TAG, "getSyncMessages: API error: ${json.optString("description")}")
+                    return@withContext emptyList()
+                }
+                
+                val results = json.optJSONArray("result") ?: return@withContext emptyList()
+                Log.i(TAG, "getSyncMessages: Got ${results.length()} updates")
+                
+                val messages = mutableListOf<TelegramMessage>()
+                
+                for (i in 0 until results.length()) {
+                    val update = results.getJSONObject(i)
+                    val updateId = update.getLong("update_id")
+                    val channelPost = update.optJSONObject("channel_post")
+                    
+                    if (channelPost == null) {
+                        Log.d(TAG, "getSyncMessages: Update $updateId has no channel_post")
+                        continue
+                    }
+                    
+                    // Check if this message is from our sync channel
+                    val chat = channelPost.optJSONObject("chat")
+                    val chatId = chat?.optLong("id")?.toString() ?: continue
+                    
+                    // Compare channel IDs (handle -100 prefix)
+                    val normalizedChannelId = if (channelId.startsWith("-100")) channelId else "-100$channelId"
+                    val normalizedChatId = if (chatId.startsWith("-")) chatId else "-100$chatId"
+                    
+                    Log.d(TAG, "getSyncMessages: Update $updateId from chat $chatId (want $channelId)")
+                    
+                    if (normalizedChatId != normalizedChannelId && chatId != channelId) {
+                        Log.d(TAG, "getSyncMessages: Skipping message from different channel")
+                        continue
+                    }
+                    
+                    val messageId = channelPost.getLong("message_id")
+                    val caption = channelPost.optString("caption", null)
+                    val doc = channelPost.optJSONObject("document")
+                    
+                    Log.d(TAG, "getSyncMessages: Found message $messageId with caption=${caption?.take(30)}")
+                    
+                    val document = if (doc != null) {
+                        TelegramDocument(
+                            fileId = doc.getString("file_id"),
+                            fileUniqueId = doc.getString("file_unique_id"),
+                            fileName = doc.optString("file_name", null),
+                            mimeType = doc.optString("mime_type", null),
+                            fileSize = doc.optLong("file_size")
+                        )
+                    } else null
+                    
+                    // Store update_id as messageId so we can track what we've processed
+                    messages.add(TelegramMessage(
+                        messageId = updateId,  // Use update_id for tracking
+                        document = document,
+                        caption = caption
+                    ))
+                }
+                
+                Log.i(TAG, "getSyncMessages: Returning ${messages.size} messages from sync channel")
+                messages
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "getSyncMessages: Error", e)
+            emptyList()
+        }
+    }
+    
+    /**
+     * Pins a message in the channel.
+     * Used to keep the sync index easily accessible.
+     */
+    suspend fun pinChatMessage(
+        token: String,
+        channelId: String,
+        messageId: Long
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val url = "https://api.telegram.org/bot$token/pinChatMessage"
+            
+            val formBody = okhttp3.FormBody.Builder()
+                .add("chat_id", channelId)
+                .add("message_id", messageId.toString())
+                .add("disable_notification", "true")
+                .build()
+            
+            val request = Request.Builder()
+                .url(url)
+                .post(formBody)
+                .build()
+            
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string() ?: return@withContext false
+                val json = JSONObject(body)
+                if (!json.optBoolean("ok")) {
+                    Log.e(TAG, "pinChatMessage: Error: ${json.optString("description")}")
+                    return@withContext false
+                }
+                return@withContext true
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "pinChatMessage: Error", e)
+            return@withContext false
+        }
+    }
+    
+    /**
+     * Gets the current pinned message from the channel.
+     * Used to find the latest sync index.
+     */
+    suspend fun getPinnedMessage(
+        token: String,
+        channelId: String
+    ): TelegramMessage? = withContext(Dispatchers.IO) {
+        try {
+            val url = "https://api.telegram.org/bot$token/getChat"
+            
+            val formBody = okhttp3.FormBody.Builder()
+                .add("chat_id", channelId)
+                .build()
+            
+            val request = Request.Builder()
+                .url(url)
+                .post(formBody)
+                .build()
+            
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string() ?: return@withContext null
+                val json = JSONObject(body)
+                if (!json.optBoolean("ok")) {
+                    Log.e(TAG, "getPinnedMessage: Error: ${json.optString("description")}")
+                    return@withContext null
+                }
+                
+                val result = json.optJSONObject("result") ?: return@withContext null
+                val pinnedMessage = result.optJSONObject("pinned_message") ?: return@withContext null
+                
+                val messageId = pinnedMessage.getLong("message_id")
+                // Check for caption (media) OR text (message)
+                val caption = pinnedMessage.optString("caption", null) ?: pinnedMessage.optString("text", null)
+                val doc = pinnedMessage.optJSONObject("document")
+                
+                val document = if (doc != null) {
+                    TelegramDocument(
+                        fileId = doc.getString("file_id"),
+                        fileUniqueId = doc.getString("file_unique_id"),
+                        fileName = doc.optString("file_name", null),
+                        mimeType = doc.optString("mime_type", null),
+                        fileSize = doc.optLong("file_size")
+                    )
+                } else null
+                
+                Log.i(TAG, "getPinnedMessage: Found pinned message $messageId")
+                
+                TelegramMessage(
+                    messageId = messageId,
+                    document = document,
+                    caption = caption
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "getPinnedMessage: Error", e)
+            return@withContext null
+        }
+    }
+    
+    /**
+     * Downloads a sync log file by its file ID.
+     * 
+     * @param token Bot token
+     * @param fileId Telegram file ID of the sync log
+     * @return Encrypted sync log bytes
+     */
+    suspend fun downloadSyncLog(
+        token: String,
+        fileId: String
+    ): ByteArray = withContext(Dispatchers.IO) {
+        Log.i(TAG, "downloadSyncLog: Getting file info for $fileId")
+        
+        // First get the file path
+        val fileInfo = getFile(token, fileId)
+        
+        // Then download the file
+        val url = "https://api.telegram.org/file/bot$token/${fileInfo.filePath}"
+        val request = Request.Builder().url(url).build()
+        
+        chunkHttpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                error("Failed to download sync log: ${response.code}")
+            }
+            response.body?.bytes() ?: error("Empty response body")
+        }
+    }
+
+    /**
      * Gets a message by ID from a channel and extracts fileId.
      * Uses forwardMessage to a temporary chat, then extracts document info.
      */
@@ -550,6 +792,73 @@ class TelegramBotClient(
             return delayMillis
         }
         return 0L
+    }
+
+    suspend fun forwardMessage(
+        token: String,
+        toChatId: String,
+        fromChatId: String,
+        messageId: Long
+    ): TelegramMessage? = rateLimiter.execute(token, toChatId) {
+        withContext(Dispatchers.IO) {
+            try {
+                val url = "https://api.telegram.org/bot$token/forwardMessage"
+                val formBody = okhttp3.FormBody.Builder()
+                    .add("chat_id", toChatId)
+                    .add("from_chat_id", fromChatId)
+                    .add("message_id", messageId.toString())
+                    .add("disable_notification", "true")
+                    .build()
+                
+                val request = Request.Builder().url(url).post(formBody).build()
+                
+                httpClient.newCall(request).execute().use { response ->
+                    val body = response.body?.string() ?: return@use null
+                    if (!response.isSuccessful) {
+                        Log.e(TAG, "forwardMessage: Failed $body")
+                        return@use null
+                    }
+                    val json = JSONObject(body)
+                    if (!json.optBoolean("ok")) return@use null
+                    
+                    val result = json.optJSONObject("result") ?: return@use null
+                    // Manually parse result to TelegramMessage since parseMessage expects {ok:true, result: ...} top-level?
+                    // No, parseMessage expects the RAW BODY string.
+                    // But here we already parsed it to check "ok".
+                    // Re-parsing is fine or we can reconstruct.
+                    // Let's reuse parseMessage logic but on the result object?
+                    // No, parseMessage takes body string.
+                    parseMessage(body)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "forwardMessage: Exception", e)
+                null
+            }
+        }
+    }
+
+    suspend fun sendTextMessage(
+        token: String,
+        channelId: String,
+        text: String
+    ): TelegramMessage = rateLimiter.execute(token, channelId) {
+        withContext(Dispatchers.IO) {
+            val url = "https://api.telegram.org/bot$token/sendMessage"
+            val formBody = okhttp3.FormBody.Builder()
+                .add("chat_id", channelId)
+                .add("text", text)
+                .build()
+                
+            val request = Request.Builder().url(url).post(formBody).build()
+            
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string() ?: error("Empty response")
+                if (!response.isSuccessful) error("Telegram error: $body")
+                val parsed = parseMessage(body)
+                Log.i(TAG, "sendTextMessage: Sent message ${parsed.messageId}")
+                parsed
+            }
+        }
     }
 
     private fun parseMessage(body: String): TelegramMessage {
@@ -602,13 +911,24 @@ class TelegramBotClient(
                     fileName = null,
                     mimeType = "image/jpeg",
                     fileSize = largestPhoto.optLong("file_size")
-                )
+                ),
+                caption = result.optString("caption", null)
+            )
+        }
+        
+        // Try text message
+        val text = result.optString("text", null)
+        if (text != null) {
+            return TelegramMessage(
+                messageId = messageId,
+                document = null,
+                caption = text
             )
         }
         
         // Log the full response for debugging
-        Log.e(TAG, "parseMessage: No document/video/photo found in response: ${body.take(1000)}")
-        error("No document, video, or photo found in Telegram response")
+        Log.e(TAG, "parseMessage: No text/document/video/photo found in response: ${body.take(1000)}")
+        error("No text, document, video, or photo found in Telegram response")
     }
 }
 

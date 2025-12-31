@@ -17,7 +17,11 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 data class BotConfig(
     val tokens: List<String>,
     val channelId: String,
-    val chatId: String?
+    val chatId: String?,
+    // Database sync configuration (optional)
+    val syncChannelId: String? = null,
+    val syncBotToken: String? = null,
+    val syncPassword: String? = null
 )
 
 class ConfigStore(private val context: Context) {
@@ -25,6 +29,10 @@ class ConfigStore(private val context: Context) {
     private val channelIdKey = stringPreferencesKey("channel_id")
     private val chatIdKey = stringPreferencesKey("chat_id")
     private val tokenCountKey = intPreferencesKey("token_count")
+    // Sync configuration keys
+    private val syncChannelIdKey = stringPreferencesKey("sync_channel_id")
+    private val syncBotTokenKey = stringPreferencesKey("sync_bot_token")
+    private val syncPasswordKey = stringPreferencesKey("sync_password")
 
     val configFlow: Flow<BotConfig?> = context.dataStore.data
         .catch { emit(emptyPreferences()) }
@@ -41,7 +49,10 @@ class ConfigStore(private val context: Context) {
                 BotConfig(
                     tokens = tokens,
                     channelId = channel,
-                    chatId = prefs[chatIdKey]
+                    chatId = prefs[chatIdKey],
+                    syncChannelId = prefs[syncChannelIdKey],
+                    syncBotToken = prefs[syncBotTokenKey],
+                    syncPassword = prefs[syncPasswordKey]
                 )
             }
         }
@@ -58,6 +69,22 @@ class ConfigStore(private val context: Context) {
                 prefs.remove(chatIdKey)
             } else {
                 prefs[chatIdKey] = config.chatId
+            }
+            // Save sync configuration
+            if (config.syncChannelId.isNullOrBlank()) {
+                prefs.remove(syncChannelIdKey)
+            } else {
+                prefs[syncChannelIdKey] = config.syncChannelId
+            }
+            if (config.syncBotToken.isNullOrBlank()) {
+                prefs.remove(syncBotTokenKey)
+            } else {
+                prefs[syncBotTokenKey] = config.syncBotToken
+            }
+            if (config.syncPassword.isNullOrBlank()) {
+                prefs.remove(syncPasswordKey)
+            } else {
+                prefs[syncPasswordKey] = config.syncPassword
             }
         }
     }

@@ -958,8 +958,11 @@ class MainActivity : ComponentActivity() {
                                 initialTokens = config?.tokens ?: emptyList(),
                                 initialChannelId = config?.channelId,
                                 initialChatId = config?.chatId,
-                                onSave = { tokens, channelId, chatId ->
-                                    viewModel.saveConfig(tokens, channelId, chatId)
+                                initialSyncChannelId = config?.syncChannelId,
+                                initialSyncBotToken = config?.syncBotToken,
+                                initialSyncPassword = config?.syncPassword,
+                                onSave = { tokens, channelId, chatId, syncChannelId, syncBotToken, syncPassword ->
+                                    viewModel.saveConfig(tokens, channelId, chatId, syncChannelId, syncBotToken, syncPassword)
                                     editingConfig = false
                                 },
                                 onImportBackup = { restoreLauncher.launch(arrayOf("application/zip")) },

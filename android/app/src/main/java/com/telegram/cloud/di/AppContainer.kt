@@ -11,6 +11,8 @@ import com.telegram.cloud.gallery.GalleryRestoreManager
 import com.telegram.cloud.gallery.GallerySyncManager
 import com.telegram.cloud.gallery.MediaScanner
 import com.telegram.cloud.tasks.TaskQueueManager
+import com.telegram.cloud.data.sync.SyncLogManager
+import com.telegram.cloud.data.sync.SyncConfig
 
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
@@ -25,7 +27,8 @@ class AppContainer(context: Context) {
         CloudDatabase.MIGRATION_1_2, 
         CloudDatabase.MIGRATION_2_3, 
         CloudDatabase.MIGRATION_3_4,
-        CloudDatabase.MIGRATION_4_5
+        CloudDatabase.MIGRATION_4_5,
+        CloudDatabase.MIGRATION_5_6
     )
         // Don't use fallbackToDestructiveMigration() to preserve data between updates
         // If a migration is missing, the app will crash - this is intentional to catch issues early
@@ -68,12 +71,23 @@ class AppContainer(context: Context) {
         .build()
 
     private val botClient = TelegramBotClient()
+    
+    // Create SyncLogManager for database sync (lazily initialized when sync config is available)
+    private val syncLogManager: SyncLogManager by lazy {
+        val deviceId = SyncConfig.getDeviceId(appContext)
+        SyncLogManager(
+            syncLogDao = database.syncLogDao(),
+            syncMetadataDao = database.syncMetadataDao(),
+            deviceId = deviceId
+        )
+    }
 
     val repository = TelegramRepository(
         context = appContext,
         configStore = configStore,
         database = database,
-        botClient = botClient
+        botClient = botClient,
+        syncLogManager = syncLogManager
     )
 
     val backupManager = BackupManager(appContext, configStore, database, repository)
