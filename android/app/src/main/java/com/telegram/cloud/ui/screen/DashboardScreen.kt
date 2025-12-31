@@ -5,15 +5,28 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -41,6 +54,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
@@ -54,11 +68,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.*
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -152,10 +172,11 @@ fun DashboardScreen(
     var showSortMenu by remember { mutableStateOf(false) }
     var showMainMenu by remember { mutableStateOf(false) }
     var fileToDelete by remember { mutableStateOf<CloudFile?>(null) }
+    var fileForOptions by remember { mutableStateOf<CloudFile?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
     var selectedFiles by remember { mutableStateOf<Set<Long>>(emptySet()) }
     val scope = rememberCoroutineScope()
-    val swipeRefreshState = rememberSwipeRefreshState(isRefreshing)
+    val swipeRefreshState = rememberSwipeRefreshState(state.isSyncing)
     var horizontalDragOffset by remember { mutableStateOf(0f) }
     val context = LocalContext.current
     val filteredFiles by remember(state.files, searchQuery, sortBy, sortOrder) {
@@ -192,6 +213,30 @@ fun DashboardScreen(
         )
     }
     
+    // File options menu
+    fileForOptions?.let { file ->
+        FileOptionsMenu(
+            file = file,
+            onDismiss = { fileForOptions = null },
+            onDownload = {
+                onDownloadClick(file)
+                fileForOptions = null
+            },
+            onShare = {
+                onShareClick(file)
+                fileForOptions = null
+            },
+            onCopyLink = {
+                onCopyLink(file)
+                fileForOptions = null
+            },
+            onDelete = {
+                fileToDelete = file
+                fileForOptions = null
+            }
+        )
+    }
+    
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
@@ -219,35 +264,110 @@ fun DashboardScreen(
                 )
             },
         topBar = {
-            LargeTopAppBar(
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-                    ) {
-                        Icon(
-                            Icons.Default.Cloud,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(ComponentSize.iconLarge)
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surfaceContainer
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = Spacing.screenPadding, vertical = Spacing.md),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Cloud icon
+                    Icon(
+                        Icons.Default.Cloud,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Spacer(Modifier.width(Spacing.sm))
+                    
+                    // Title - takes available space
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.app_name),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            fontWeight = FontWeight.Bold
                         )
-                        Column {
-                            Text(
-                                stringResource(R.string.app_name),
-                                style = MaterialTheme.typography.headlineSmall,
-                                color = MaterialTheme.colorScheme.onBackground,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                stringResource(R.string.subtitle_tagline),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        Text(
+                            stringResource(R.string.subtitle_tagline),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    
+                    // Sync indicator - rotating arc
+                    val primaryColor = MaterialTheme.colorScheme.primary
+                    
+                    if (state.isSyncing) {
+                        var currentRotation by remember { mutableFloatStateOf(0f) }
+                        var pulseAlpha by remember { mutableFloatStateOf(0.3f) }
+                        var pulseDirection by remember { mutableStateOf(true) }
+                        
+                        LaunchedEffect(Unit) {
+                            while (true) {
+                                delay(16L) // ~60fps
+                                currentRotation = (currentRotation + 4f) % 360f
+                                
+                                // Pulse effect
+                                if (pulseDirection) {
+                                    pulseAlpha += 0.015f
+                                    if (pulseAlpha >= 0.6f) pulseDirection = false
+                                } else {
+                                    pulseAlpha -= 0.015f
+                                    if (pulseAlpha <= 0.2f) pulseDirection = true
+                                }
+                            }
+                        }
+                        
+                        Box(
+                            modifier = Modifier.size(48.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Canvas(modifier = Modifier.size(36.dp)) {
+                                // Background glow ring (pulsing)
+                                drawArc(
+                                    color = primaryColor.copy(alpha = pulseAlpha * 0.5f),
+                                    startAngle = 0f,
+                                    sweepAngle = 360f,
+                                    useCenter = false,
+                                    style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
+                                )
+                                
+                                // Secondary arc (slower, offset)
+                                drawArc(
+                                    color = primaryColor.copy(alpha = 0.3f),
+                                    startAngle = currentRotation * 0.7f + 180f,
+                                    sweepAngle = 120f,
+                                    useCenter = false,
+                                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                                )
+                                
+                                // Main arc (primary)
+                                drawArc(
+                                    color = primaryColor,
+                                    startAngle = currentRotation,
+                                    sweepAngle = 90f,
+                                    useCenter = false,
+                                    style = Stroke(width = 3.5.dp.toPx(), cap = StrokeCap.Round)
+                                )
+                                
+                                // Highlight arc (faster, shorter)
+                                drawArc(
+                                    color = primaryColor.copy(alpha = 0.7f),
+                                    startAngle = -currentRotation * 1.3f,
+                                    sweepAngle = 45f,
+                                    useCenter = false,
+                                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                                )
+                            }
                         }
                     }
-                },
-                scrollBehavior = scrollBehavior,
-                actions = {
+                    
+                    // Menu button
                     Box {
                         AnimatedIconButton(
                             onClick = { showMainMenu = true },
@@ -328,11 +448,8 @@ fun DashboardScreen(
                             )
                         }
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                )
-            )
+                }
+            }
         },
         bottomBar = {
             if (selectedFiles.isNotEmpty()) {
@@ -375,12 +492,20 @@ fun DashboardScreen(
                     delay(500)
                     isRefreshing = false
                 }
+            },
+            indicator = { state, trigger ->
+                com.google.accompanist.swiperefresh.SwipeRefreshIndicator(
+                    state = state,
+                    refreshTriggerDistance = trigger,
+                    backgroundColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.primary,
+                    scale = true
+                )
             }
         ) {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .nestedScroll(scrollBehavior.nestedScrollConnection)
                     .padding(innerPadding)
                     .padding(horizontal = Spacing.screenPadding),
                 verticalArrangement = Arrangement.spacedBy(Spacing.md),
@@ -388,7 +513,10 @@ fun DashboardScreen(
                     top = Spacing.lg,
                     bottom = Spacing.screenPadding
                 )
-            ) {
+                ) {
+
+
+
             item {
                 StatsCard(
                     totalSize = totalSize,
@@ -420,16 +548,6 @@ fun DashboardScreen(
             }
 
             item {
-                SearchBar(
-                    query = searchQuery,
-                    onQueryChange = { searchQuery = it },
-                    onClear = { searchQuery = "" }
-                )
-            }
-
-            item {
-                val libraryLabel = stringResource(R.string.library)
-                val resultsLabel = stringResource(R.string.results)
                 val sortNameLabel = stringResource(R.string.sort_name)
                 val sortSizeLabel = stringResource(R.string.sort_size)
                 val sortDateLabel = stringResource(R.string.sort_date)
@@ -437,35 +555,70 @@ fun DashboardScreen(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            text = if (searchQuery.isEmpty())
-                                libraryLabel
-                            else
-                                resultsLabel,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.Medium
+                    // Search bar - takes available space
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = {
+                            Text(
+                                stringResource(R.string.search_files),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { searchQuery = "" },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                        textStyle = MaterialTheme.typography.bodySmall,
+                        shape = RoundedCornerShape(Radius.md),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = Color.Transparent
                         )
-                        Text(
-                            text = "${filteredFiles.size} ${stringResource(R.string.files)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
+                    )
+                    
+                    // Sort selector
                     Box {
                         Card(
-                            modifier = Modifier.clickable(onClick = { showSortMenu = true }),
+                            modifier = Modifier
+                                .height(48.dp)
+                                .clickable(onClick = { showSortMenu = true }),
                             shape = RoundedCornerShape(Radius.md),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                            elevation = CardDefaults.cardElevation(defaultElevation = Elevation.level2)
+                            elevation = CardDefaults.cardElevation(defaultElevation = Elevation.level1)
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                                modifier = Modifier
+                                    .padding(horizontal = Spacing.md)
+                                    .fillMaxHeight(),
                                 horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -608,7 +761,7 @@ fun DashboardScreen(
                 itemsIndexed(
                     items = filteredFiles,
                     key = { _, file -> file.id }
-                ) { index, file ->
+                ) { _, file ->
                     FileCard(
                         file = file,
                         isSelected = selectedFiles.contains(file.id),
@@ -619,6 +772,7 @@ fun DashboardScreen(
                                 selectedFiles + file.id
                             }
                         },
+                        onLongClick = { fileForOptions = file },
                         modifier = Modifier
                             .semantics(mergeDescendants = false) {
                                 contentDescription = "${context.getString(R.string.file_fallback)} ${file.fileName}, tamaño ${formatFileSize(file.sizeBytes)}, fecha ${formatDate(file.uploadedAt)}"
@@ -670,6 +824,66 @@ private fun DeleteConfirmationDialog(
         },
         containerColor = MaterialTheme.colorScheme.surface,
         shape = MaterialTheme.shapes.large
+    )
+}
+
+@Composable
+private fun FileOptionsMenu(
+    file: CloudFile,
+    onDismiss: () -> Unit,
+    onDownload: () -> Unit,
+    onShare: () -> Unit,
+    onCopyLink: () -> Unit,
+    onDelete: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = file.fileName,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.download)) },
+                    onClick = onDownload,
+                    leadingIcon = {
+                        Icon(Icons.Default.CloudDownload, contentDescription = null, tint = AppColors.download)
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.share)) },
+                    onClick = onShare,
+                    leadingIcon = {
+                        Icon(Icons.Default.Share, contentDescription = null, tint = AppColors.share)
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.copy_link)) },
+                    onClick = onCopyLink,
+                    leadingIcon = {
+                        Icon(Icons.Default.Link, contentDescription = null)
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) },
+                    onClick = onDelete,
+                    leadingIcon = {
+                        Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    }
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
     )
 }
 
@@ -856,6 +1070,8 @@ private fun SearchBar(
         textStyle = MaterialTheme.typography.bodySmall
     )
 }
+
+
 
 @Composable
 private fun ProgressCard(
@@ -1121,11 +1337,13 @@ private fun SelectionActionBar(
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun FileCard(
     file: CloudFile,
     isSelected: Boolean,
     onSelect: () -> Unit,
+    onLongClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val fileColor = getFileTypeColor(file.mimeType)
@@ -1133,7 +1351,10 @@ private fun FileCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onSelect)
+            .combinedClickable(
+                onClick = onSelect,
+                onLongClick = onLongClick
+            )
             .then(
                 if (isSelected) {
                     Modifier.border(

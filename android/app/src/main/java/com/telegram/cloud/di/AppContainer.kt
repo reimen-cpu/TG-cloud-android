@@ -98,7 +98,8 @@ class AppContainer(context: Context) {
         context = appContext,
         database = database,
         galleryDao = database.galleryMediaDao(),
-        repository = repository
+        repository = repository,
+        syncLogManager = syncLogManager
     )
     
     val galleryRestoreManager = GalleryRestoreManager(

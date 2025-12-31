@@ -689,6 +689,15 @@ fun CloudGalleryScreen(
                     kotlinx.coroutines.delay(500)
                     isRefreshing = false
                 }
+            },
+            indicator = { state, trigger ->
+                com.google.accompanist.swiperefresh.SwipeRefreshIndicator(
+                    state = state,
+                    refreshTriggerDistance = trigger,
+                    backgroundColor = materialTheme.primaryContainer,
+                    contentColor = materialTheme.primary,
+                    scale = true
+                )
             }
         ) {
             when {

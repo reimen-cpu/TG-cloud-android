@@ -169,5 +169,6 @@
     <string name="sync_stopped">Sync stopped</string>
     <string name="syncing_files">Syncing %1$d file(s)…</string>
     <string name="downloading_files">Downloading %1$d file(s)…</string>
+    <string name="syncing">Syncing…</string>
     <string name="downloading_link">Downloading from link…</string>
 </resources>

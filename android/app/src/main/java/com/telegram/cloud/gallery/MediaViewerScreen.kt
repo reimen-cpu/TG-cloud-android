@@ -120,27 +120,30 @@ fun MediaViewerScreen(
     
     // Update upload state when progress changes
     LaunchedEffect(uploadProgress, isSyncing) {
-        if (isSyncing) {
-            if (uploadProgress > 0f && uploadProgress < 1f) {
-                uploadState = MediaUploadState.Uploading(uploadProgress)
-            } else if (uploadProgress >= 1f) {
-                uploadState = MediaUploadState.Uploading(1f)
-                kotlinx.coroutines.delay(500)
-                uploadState = MediaUploadState.Completed
-                kotlinx.coroutines.delay(1500)
-                uploadState = MediaUploadState.Idle
-            } else {
-                uploadState = MediaUploadState.Uploading(0f)
+        if (isSyncing || uploadProgress > 0f) {
+            // Active upload - update progress
+            when {
+                uploadProgress >= 1f -> {
+                    uploadState = MediaUploadState.Uploading(1f)
+                    kotlinx.coroutines.delay(500)
+                    uploadState = MediaUploadState.Completed
+                    kotlinx.coroutines.delay(1500)
+                    uploadState = MediaUploadState.Idle
+                }
+                uploadProgress > 0f -> {
+                    uploadState = MediaUploadState.Uploading(uploadProgress)
+                }
+                isSyncing -> {
+                    // Just started syncing, keep showing progress at 0
+                    uploadState = MediaUploadState.Uploading(0f)
+                }
             }
-        } else {
-            if (uploadState is MediaUploadState.Uploading && uploadProgress >= 1f) {
-                // Sync completed
-                uploadState = MediaUploadState.Completed
-                kotlinx.coroutines.delay(1500)
-                uploadState = MediaUploadState.Idle
-            } else if (!isSyncing && uploadState !is MediaUploadState.Completed) {
-                uploadState = MediaUploadState.Idle
-            }
+        } else if (uploadState is MediaUploadState.Completed) {
+            // Keep completed state until it transitions to Idle
+        } else if (uploadState is MediaUploadState.Uploading) {
+            // Upload was cancelled or failed - only reset if we were actually uploading
+            // and sync is truly done (not just starting)
+            uploadState = MediaUploadState.Idle
         }
     }
     
@@ -490,6 +493,8 @@ fun MediaViewerScreen(
                     } else {
                         IconButton(
                             onClick = { 
+                                // Immediately set uploading state to prevent double-clicks
+                                uploadState = MediaUploadState.Uploading(0f)
                                 onSyncClick?.invoke(0f)
                                 onSync()
                             },

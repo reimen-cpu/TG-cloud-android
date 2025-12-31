@@ -11,6 +11,8 @@ import com.telegram.cloud.data.repository.TelegramRepository
 import com.telegram.cloud.data.remote.ChunkedDownloadManager
 import com.telegram.cloud.data.remote.ChunkedUploadManager
 import com.telegram.cloud.data.remote.TelegramBotClient
+import com.telegram.cloud.data.sync.SyncLogManager
+import com.telegram.cloud.data.sync.SyncOperation
 import com.telegram.cloud.utils.ResourceGuard
 import com.telegram.cloud.utils.getUserVisibleDownloadsDir
 import com.telegram.cloud.utils.moveFileToDownloads
@@ -37,7 +39,9 @@ class GallerySyncManager(
     private val context: Context,
     private val database: CloudDatabase,
     private val galleryDao: GalleryMediaDao,
-    private val repository: TelegramRepository
+    private val repository: TelegramRepository,
+    private val syncLogManager: SyncLogManager? = null,
+    var onPendingSyncLogs: (() -> Unit)? = null
 ) {
     private val botClient = TelegramBotClient()
     private val chunkedUploadManager = ChunkedUploadManager(botClient, context.contentResolver)
@@ -255,7 +259,37 @@ class GallerySyncManager(
                 checksum = null,
                 uploaderTokens = updated.telegramUploaderTokens
             )
-            database.cloudFileDao().insert(cloudEntry)
+            // Insert returns the generated ID
+            val insertedId = database.cloudFileDao().insert(cloudEntry)
+            Log.i(TAG, "Added to cloud_files: ${updated.filename} with id=$insertedId")
+            
+            // Log sync operation for cross-device synchronization using the generated ID
+            if (syncLogManager != null) {
+                Log.i(TAG, "Creating sync log for cloud_files INSERT, id=$insertedId")
+                syncLogManager.logOperation(
+                    operation = SyncOperation.INSERT,
+                    tableName = "cloud_files",
+                    primaryKey = insertedId.toString(),
+                    data = mapOf(
+                        "id" to insertedId,
+                        "telegramMessageId" to cloudEntry.telegramMessageId,
+                        "fileId" to cloudEntry.fileId,
+                        "fileUniqueId" to cloudEntry.fileUniqueId,
+                        "fileName" to cloudEntry.fileName,
+                        "mimeType" to cloudEntry.mimeType,
+                        "sizeBytes" to cloudEntry.sizeBytes,
+                        "uploadedAt" to cloudEntry.uploadedAt,
+                        "caption" to cloudEntry.caption,
+                        "uploaderTokens" to cloudEntry.uploaderTokens
+                    )
+                )
+                Log.i(TAG, "Sync log created successfully for ${updated.filename}")
+                // Notify that there are pending sync logs to upload
+                onPendingSyncLogs?.invoke()
+            } else {
+                Log.w(TAG, "SyncLogManager is null, skipping sync log for ${updated.filename}")
+            }
+            
             // Recargar archivos desde la base de datos inmediatamente (similar a LoadFiles en desktop)
             repository.reloadFilesFromDatabase()
         } catch (e: Exception) {
@@ -274,12 +308,36 @@ class GallerySyncManager(
         config: BotConfig,
         onProgress: ((Float) -> Unit)? = null
     ): Boolean {
-        val result = uploadMedia(media, config.channelId, config.tokens, onProgress)
-        onProgress?.invoke(if (result) 1f else 0f)
-        if (result) {
-            addToCloudFiles(media)
+        // Update sync state to show this file is being synced
+        _currentFileName.value = media.filename
+        _syncState.value = SyncState.Syncing(media.filename, 1, 1)
+        _syncProgress.value = 0f
+        
+        try {
+            val result = uploadMedia(media, config.channelId, config.tokens) { progress ->
+                // Update both the callback and the state flow for UI
+                _syncProgress.value = progress
+                onProgress?.invoke(progress)
+            }
+            
+            if (result) {
+                _syncProgress.value = 1f
+                onProgress?.invoke(1f)
+                // NOTE: addToCloudFiles is already called in handleChunkedResult, don't call it here
+                _syncState.value = SyncState.Completed
+            } else {
+                _syncState.value = SyncState.Error("Upload failed")
+                onProgress?.invoke(0f)
+            }
+            
+            return result
+        } finally {
+            // Reset state after a short delay to allow UI to show completion
+            kotlinx.coroutines.delay(1500)
+            _syncState.value = SyncState.Idle
+            _syncProgress.value = 0f
+            _currentFileName.value = null
         }
-        return result
     }
 
     suspend fun downloadMediaFromTelegram(

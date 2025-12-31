@@ -118,6 +118,13 @@ class MainActivity : ComponentActivity() {
             val linkDownloadManager = remember { LinkDownloadManager(TelegramBotClient()) }
             val multiLinkDownloadManager = remember { MultiLinkDownloadManager(linkDownloadManager, shareLinkManager) }
             
+            // Connect gallery sync logs to main sync engine
+            LaunchedEffect(Unit) {
+                container.gallerySyncManager.onPendingSyncLogs = {
+                    viewModel.performSync()
+                }
+            }
+            
             val config by viewModel.config.collectAsState()
             val dashboard by viewModel.dashboardState.collectAsState()
             val context = LocalContext.current

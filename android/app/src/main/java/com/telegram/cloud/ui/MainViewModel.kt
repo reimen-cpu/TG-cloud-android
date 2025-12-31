@@ -49,6 +49,7 @@ data class DashboardState(
     val downloadProgress: Float = 0f,
     val currentFileName: String? = null,
     val isConfigLoaded: Boolean = false,
+    val isSyncing: Boolean = false,
     // Gallery sync state
     val isGallerySyncing: Boolean = false,
     val gallerySyncProgress: Float = 0f,
@@ -157,7 +158,8 @@ class MainViewModel(
         _uploadProgress,
         _downloadProgress,
         _currentFileName,
-        _configLoaded
+        _configLoaded,
+        _isSyncing
     ) { array ->
         @Suppress("UNCHECKED_CAST")
         DashboardState(
@@ -167,7 +169,8 @@ class MainViewModel(
             uploadProgress = array[3] as Float,
             downloadProgress = array[4] as Float,
             currentFileName = array[5] as String?,
-            isConfigLoaded = array[6] as Boolean
+            isConfigLoaded = array[6] as Boolean,
+            isSyncing = array[7] as Boolean
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, DashboardState())
     

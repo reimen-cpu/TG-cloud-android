@@ -323,6 +323,7 @@ class GalleryViewModel(
      * When deleted from Cloud Gallery, it ALWAYS deletes from Telegram too (if synced)
      * Thumbnails are ONLY deleted when user deletes via Cloud Gallery
      */
+    @Suppress("UNUSED_PARAMETER")
     fun deleteMedia(media: GalleryMediaEntity, deleteFromTelegram: Boolean, config: BotConfig?) {
         viewModelScope.launch {
             try {
