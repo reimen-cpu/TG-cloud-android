@@ -310,7 +310,7 @@ fun DashboardScreen(
                         LaunchedEffect(Unit) {
                             while (true) {
                                 delay(16L) // ~60fps
-                                currentRotation = (currentRotation + 4f) % 360f
+                                currentRotation += 4f // Sin % 360f para evitar el salto
                                 
                                 // Pulse effect
                                 if (pulseDirection) {
