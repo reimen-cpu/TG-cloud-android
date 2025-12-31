@@ -32,7 +32,7 @@ This application has NO file size or storage limits.**
 ### ☁️ Shared Cloud & Multi-Device Sync
 
 - **Multi-Device Synchronization**: Sync your files across unlimited devices instantly to create a unified personal cloud.
-- **Shared Clouds**: Create collaborative clouds by sharing your `Sync Channel` and `Sync Password` with friends or team members.
+- **Shared Clouds**: Create collaborative clouds by sharing your `Sync Channel`, `Bot Token`, and `Sync Password` with friends or team members.
 - **Instant Cloud Switching**: Change the **Sync Password** int settings to instantly switch between different shared clouds (e.g., "Family", "Work", "Private") while keeping the same Bot and Channel.
 - **Secure Distribution**: Distribute content only to specific groups by managing encryption keys.
 
