@@ -1,6 +1,6 @@
 # Telegram Cloud Android - Release Notes
 
-## v1.2.0 (2024-12-29)
+## v1.2.0 (2025-12-29)
 
 ### 🎉 Stable Release
 
