@@ -29,6 +29,20 @@ This application has NO file size or storage limits.**
 - **Multiple bots**: Support for multiple bot tokens for higher speed.
 - **Parallel upload**: Chunks are uploaded simultaneously.
 
+### ☁️ Shared Cloud & Multi-Device Sync
+
+- **Multi-Device Synchronization**: Sync your files across unlimited devices instantly to create a unified personal cloud.
+- **Shared Clouds**: Create collaborative clouds by sharing your `Sync Channel` and `Sync Password` with friends or team members.
+- **Instant Cloud Switching**: Change the **Sync Password** int settings to instantly switch between different shared clouds (e.g., "Family", "Work", "Private") while keeping the same Bot and Channel.
+- **Secure Distribution**: Distribute content only to specific groups by managing encryption keys.
+
+### 🔄 Infinite Sync Scalability (Technical)
+
+- **Linked List Chain**: Sync logs are stored as a linked chain of messages, eliminating large index downloads.
+- **Smart Backtracking**: Devices only download new logs by traversing the chain backwards.
+- **Adaptive Upload**: Logs are automatically compressed and adapted (Text or Document) for maximum efficiency.
+- **Atomic Operations**: Robust transaction management ensures data consistency across all devices.
+
 ### Functionalities
 
 - 📤 **Native upload and download**.
