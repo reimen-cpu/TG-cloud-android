@@ -69,7 +69,7 @@ This application has NO file size or storage limits.**
 ## 📦 Installation
 
 ### Option 1: Download APK
-Go to the [Releases](https://github.com/reimen-cpu/TG-cloud-android/releases/tag/V1.2) section and download the latest version.
+Go to the [Releases](https://github.com/reimen-cpu/TG-cloud-android/releases/tag/V1.2.1) section and download the latest version.
 
 ### Option 2: Manual Compilation
 Follow the instructions below.
