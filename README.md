@@ -11,35 +11,76 @@ Android application to manage files in the cloud using Telegram as a backend. **
 
 ## 🚀 Main Features
 
-### No Size or Storage Limits
+### 📦 No Size or Storage Limits
 
 - **Large files**: Uses chunked upload (4MB) for files of any size.
 - **Unlimited storage**: Telegram imposes no practical storage limits.
-- **Multiple bots**: Support for multiple bot tokens for higher speed.
-- **Parallel upload**: Chunks are uploaded simultaneously.
+- **Multiple bots**: Support for multiple bot tokens with intelligent distribution.
+- **Dynamic Token Allocation**: Automatically distributes bot tokens based on active operations:
+  - Single operation uses all tokens for maximum speed
+  - Multiple operations share tokens fairly (up to 5 concurrent operations)
+- **Parallel upload/download**: Chunks are processed simultaneously across available tokens.
+
+### ⚡ Advanced Upload/Download System
+
+- **Immediate Cancellation**: Cancel operations instantly without waiting for current chunk to finish.
+- **Streaming Downloads**: Memory-efficient streaming directly to disk prevents OutOfMemory errors.
+- **Batch Processing**: Smart batching for gallery sync with configurable batch sizes.
+- **Resume Support**: Automatically resume interrupted uploads and downloads.
+- **Orphaned Chunk Cleanup**: Properly cleans up incomplete chunks when operations are cancelled.
+- **Token Fallback**: Automatically tries alternative bot tokens if file is unavailable with primary token.
 
 ### ☁️ Shared Cloud & Multi-Device Sync
 
 - **Multi-Device Synchronization**: Sync your files across unlimited devices instantly to create a unified personal cloud.
 - **Shared Clouds**: Create collaborative clouds by sharing your `Sync Channel`, `Bot Token`, and `Sync Password` with friends or team members.
-- **Instant Cloud Switching**: Change the **Sync Password** int settings to instantly switch between different shared clouds (e.g., "Family", "Work", "Private") while keeping the same Bot and Channel.
+- **Instant Cloud Switching**: Change the **Sync Password** in settings to instantly switch between different shared clouds (e.g., "Family", "Work", "Private") while keeping the same Bot and Channel.
 - **Secure Distribution**: Distribute content only to specific groups by managing encryption keys.
+- **Continuous Sync Animation**: Visual feedback with smooth rotating arc indicator during sync operations.
+- **Robust Error Handling**: Proper handling of .webp and other file types during sync.
 
 ### 🔄 Infinite Sync Scalability (Technical)
 
 - **Linked List Chain**: Sync logs are stored as a linked chain of messages, eliminating large index downloads.
 - **Smart Backtracking**: Devices only download new logs by traversing the chain backwards.
 - **Adaptive Upload**: Logs are automatically compressed and adapted (Text or Document) for maximum efficiency.
-- **Atomic Operations**: Robust transaction management ensures data consistency across all devices.
+- **Atomic Operations**: Robust transaction management with `withTransaction` blocks ensures data consistency across all devices.
+- **Crash Prevention**: Fixed concurrency issues and race conditions in sync log application.
 
-### Functionalities
+### 🖼️ Gallery Sync & Restore
 
-- 📤 **Native upload and download**.
-- 🖼️ **Media gallery** with automatic synchronization.
-- 🔐 **Encrypted backups** and secure database (SQLCipher).
-- 🔗 **.link files** for sharing protected content.
+- **Automatic Gallery Backup**: Sync photos and videos from device gallery to cloud.
+- **Batch Upload**: Configurable batch processing for efficient gallery synchronization.
+- **Progress Tracking**: Real-time progress indicators for gallery uploads.
+- **Restore All**: One-click restore of all cloud files to device.
+- **Background Restore**: Continue restore operations even when app is closed.
+- **Memory Optimized**: Streaming downloads prevent memory issues during large restores.
+
+### 🔗 Link Generation & Sharing
+
+- **Single File Links**: Generate encrypted `.link` files for individual files.
+- **Multi-File Links**: Create batch `.link` files for sharing multiple files at once.
+- **Dashboard Integration**: Generate links directly from file selection in dashboard.
+- **Cross-Platform**: `.link` files compatible with desktop version.
+- **Password Protected**: All links encrypted with user-defined passwords.
+
+### 🎨 User Interface
+
 - 📱 **Material Design 3 Interface** (Jetpack Compose).
-- 🎬 **Integrated video player** (ExoPlayer).
+- 🌙 **Dark Theme** with modern aesthetics.
+- 🔄 **Pull-to-Refresh** with custom indicators.
+- 📊 **Real-time Progress**: Visual feedback for all operations.
+- 🎬 **Integrated Video Player** (ExoPlayer).
+- 🔍 **Search & Sort**: Find and organize files easily.
+- ✅ **Batch Operations**: Select multiple files for download/delete/share.
+
+### 🔐 Security & Reliability
+
+- **Encrypted Backups**: Secure database with SQLCipher.
+- **Encrypted Links**: All `.link` files password-protected.
+- **No Analytics**: No external tracking or data collection.
+- **Atomic Transactions**: Database operations wrapped in transactions for consistency.
+- **ProGuard Optimized**: Release builds properly configured with R8/ProGuard rules.
 
 ## 📋 Requirements
 
@@ -58,7 +99,7 @@ Android application to manage files in the cloud using Telegram as a backend. **
 ## 📦 Installation
 
 ### Option 1: Download APK
-Go to the [Releases](https://github.com/reimen-cpu/TG-cloud-android/releases/tag/V1.2.1) section and download the latest version.
+Go to the [Releases](https://github.com/reimen-cpu/TG-cloud-android/releases/latest) section and download the latest version.
 
 ### Option 2: Manual Compilation
 Follow the instructions below.
