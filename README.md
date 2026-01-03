@@ -13,8 +13,6 @@ Android application to manage files in the cloud using Telegram as a backend. **
 
 ### No Size or Storage Limits
 
-This application has NO file size or storage limits.**
-
 - **Large files**: Uses chunked upload (4MB) for files of any size.
 - **Unlimited storage**: Telegram imposes no practical storage limits.
 - **Multiple bots**: Support for multiple bot tokens for higher speed.
