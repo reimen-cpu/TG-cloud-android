@@ -183,10 +183,13 @@ class GalleryViewModel(
                     Log.d(TAG, "Inserted ${newMedia.size} new media files")
                 }
                 
-                // Generate thumbnails for ALL media without thumbnails (including videos)
-                val mediaWithoutThumbs = galleryDao.getAll().filter { it.thumbnailPath == null }
+                // Generate thumbnails for ALL media without thumbnails or with missing files
+                val allMedia = galleryDao.getAll()
+                val mediaWithoutThumbs = allMedia.filter { 
+                    it.thumbnailPath == null || !java.io.File(it.thumbnailPath).exists() 
+                }
                 val totalThumbs = mediaWithoutThumbs.size
-                Log.d(TAG, "Generating thumbnails for $totalThumbs media files...")
+                Log.d(TAG, "Generating thumbnails for $totalThumbs media files (new or missing)...")
                 
                 val generatedCount = java.util.concurrent.atomic.AtomicInteger(0)
                 val progressStep = if (totalThumbs <= 0) 1 else max(1, totalThumbs / 20)

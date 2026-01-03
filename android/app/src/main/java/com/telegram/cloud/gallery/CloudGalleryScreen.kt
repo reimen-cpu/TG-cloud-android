@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.painterResource
 import com.telegram.cloud.R
 import coil.compose.AsyncImage
 import coil.decode.VideoFrameDecoder
@@ -908,21 +909,33 @@ private fun AlbumCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Album thumbnail
-            val thumbnailFile = album.thumbnailPath?.let { File(it) }
+            // Album thumbnail - prefer thumbnailPath, then falls back to first media's thumbnail
+            val thumbnailPath = album.thumbnailPath
+            val isVideo = album.mediaTypes.contains(MediaType.VIDEO) && !album.mediaTypes.contains(MediaType.IMAGE)
             
-            if (thumbnailFile?.exists() == true) {
+            if (thumbnailPath != null) {
                 AsyncImage(
                     model = ImageRequest.Builder(context)
-                        .data(thumbnailFile)
+                        .data(File(thumbnailPath))
                         .crossfade(true)
+                        .apply {
+                            // Extract frames for videos that are being used as thumbnails
+                            if (isVideo || thumbnailPath.lowercase().run { endsWith(".mp4") || endsWith(".mkv") || endsWith(".mov") }) {
+                                decoderFactory { result, options, _ ->
+                                    VideoFrameDecoder(result.source, options)
+                                }
+                                videoFrameMillis(1000)
+                            }
+                        }
                         .build(),
                     contentDescription = album.displayName,
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
+                    contentScale = ContentScale.Crop,
+                    error = painterResource(id = R.drawable.ic_launcher_foreground), // Fallback if image fails to load
+                    fallback = painterResource(id = R.drawable.ic_launcher_foreground)
                 )
             } else {
-                // Placeholder
+                // Placeholder if no path at all
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
@@ -1249,7 +1262,9 @@ private fun MediaThumbnail(
                     .build(),
                 contentDescription = media.filename,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
+                error = painterResource(id = R.drawable.ic_launcher_foreground),
+                fallback = painterResource(id = R.drawable.ic_launcher_foreground)
             )
         } else {
             // Placeholder when no thumbnail or local file exists

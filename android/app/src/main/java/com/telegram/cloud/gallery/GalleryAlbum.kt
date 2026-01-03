@@ -106,12 +106,13 @@ object AlbumGrouper {
         name: String,
         media: List<GalleryMediaEntity>
     ): GalleryAlbum {
-        // Find best thumbnail (prefer synced, then most recent)
+        // Find best thumbnail (prefer synced, then most recent, then verify existence)
         val thumbnail = media
             .sortedByDescending { it.dateTaken }
-            .firstOrNull { it.thumbnailPath != null }
+            .firstOrNull { it.thumbnailPath != null && File(it.thumbnailPath).exists() }
             ?.thumbnailPath
-            ?: media.firstOrNull()?.thumbnailPath
+            ?: media.sortedByDescending { it.dateTaken }.firstOrNull { File(it.localPath).exists() }?.localPath
+            ?: media.firstOrNull()?.thumbnailPath // Last resort
             ?: media.firstOrNull()?.localPath
         
         val mediaTypes = mutableSetOf<MediaType>()
