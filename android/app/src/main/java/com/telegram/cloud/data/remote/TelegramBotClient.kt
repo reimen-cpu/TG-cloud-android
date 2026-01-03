@@ -1041,6 +1041,21 @@ class TelegramBotClient(
             )
         }
         
+        // Try sticker (for .webp files that Telegram interprets as stickers)
+        val sticker = result.optJSONObject("sticker")
+        if (sticker != null) {
+            return TelegramMessage(
+                messageId = messageId,
+                document = TelegramDocument(
+                    fileId = sticker.getString("file_id"),
+                    fileUniqueId = sticker.getString("file_unique_id"),
+                    fileName = null, // Stickers don't have file_name
+                    mimeType = "image/webp",
+                    fileSize = sticker.optLong("file_size")
+                )
+            )
+        }
+        
         // Try text message
         val text = result.optString("text", null)
         if (text != null) {
@@ -1052,8 +1067,7 @@ class TelegramBotClient(
         }
         
         // Log the full response for debugging
-        Log.e(TAG, "parseMessage: No text/document/video/photo found in response: ${body.take(1000)}")
-        error("No text, document, video, or photo found in Telegram response")
+        Log.e(TAG, "parseMessage: No text/document/video/photo/sticker found in response: ${body.take(1000)}")
+        error("No text, document, video, photo, or sticker found in Telegram response")
     }
 }
-

@@ -50,7 +50,8 @@ class ChunkedDownloadManager(
         Log.i(TAG, "  Bot pool: ${tokens.size} tokens")
         
         val completedChunks = AtomicInteger(0)
-        val chunkDataMap = mutableMapOf<Int, ByteArray>()
+        // REMOVED: chunkDataMap (Memory optimization)
+        // val chunkDataMap = mutableMapOf<Int, ByteArray>()
         val errors = mutableListOf<String>()
         val failedChunkIndices = mutableSetOf<Int>()
         
@@ -63,29 +64,24 @@ class ChunkedDownloadManager(
         // Load existing chunks from disk if resuming
         val initialCompleted = skipChunks.size
         if (skipChunks.isNotEmpty()) {
-            Log.i(TAG, "Resuming download: loading ${skipChunks.size} existing chunks from disk")
+            Log.i(TAG, "Resuming download: verifying ${skipChunks.size} existing chunks on disk")
             completedChunks.set(initialCompleted)
             
+            // Just verify they exist
             for (index in skipChunks) {
                 val chunkFile = File(tempDir, "chunk_${index}.tmp")
-                if (chunkFile.exists()) {
-                    val chunkData = chunkFile.readBytes()
-                    synchronized(chunkDataMap) {
-                        chunkDataMap[index] = chunkData
-                    }
-                    Log.d(TAG, "Loaded chunk $index from disk (${chunkData.size} bytes)")
-                } else {
+                if (!chunkFile.exists()) {
                     Log.w(TAG, "Chunk file missing for index $index: ${chunkFile.absolutePath}")
+                    // If missing, we should probably remove it from completed, but for now we assume caller is right
                 }
             }
         }
         
         try {
             // Use global Balancer for token management across all concurrent operations
-            // This prevents rate limiting when multiple chunked operations run simultaneously
             Log.i(TAG, "Using global Balancer with ${tokens.size} tokens")
 
-            // Register new operation with Balancer to track active load
+            // Register new operation
             if (!Balancer.registerOperation()) {
                 Log.e(TAG, "Too many concurrent operations, cannot start download")
                 return@withContext ChunkDownloadResult(false, outputFile, "Too many concurrent operations")
@@ -106,22 +102,16 @@ class ChunkedDownloadManager(
                 }
                 chunkChannel.close()
                 
-                // Dynamic worker allocation:
-                // 1 active op -> use all tokens (speed)
-                // Multiple active ops -> split tokens (fairness)
+                // Dynamic worker allocation
                 val workersPerDownload = Balancer.getWorkersPerOperation(tokens.size)
                 Log.i(TAG, "Using $workersPerDownload concurrent workers for this download (Active ops: ${Balancer.getActiveOperationCount()})")
                 
                 val workerJobs = (0 until workersPerDownload).map { workerId ->
                     async {
                         for ((index, fileId) in chunkChannel) {
-                            // Check for cancellation
-                            // Download jobs are attached to the parent scope, so standard cancellation works,
-                            // but explicit check is safer for long running loops
                             ensureActive()
 
                             // Use global Balancer to acquire a token slot
-                            // Pass output file name as operation ID for fairness
                             Balancer.withToken(tokens, operationId = outputFile.name) { token ->
                                 val chunkData = downloadSingleChunk(fileId, token, tokens)
                                 
@@ -131,15 +121,17 @@ class ChunkedDownloadManager(
                                     chunkFile.writeBytes(chunkData)
                                     Log.d(TAG, "Saved chunk $index to disk: ${chunkFile.absolutePath}")
                                     
-                                    synchronized(chunkDataMap) {
-                                        chunkDataMap[index] = chunkData
-                                    }
+                                    // Removed: chunkDataMap[index] = chunkData
+                                    
                                     val completed = completedChunks.incrementAndGet()
                                     val percent = completed.toFloat() / totalChunks * 100
-                                    Log.i(TAG, "Chunk $index downloaded ($completed/$totalChunks - ${percent.toInt()}%)")
-                                    onProgress?.invoke(completed, totalChunks, percent)
                                     
-                                    // Notify callback for progress persistence
+                                    // Log every 5% to reduce noise
+                                    if (completed % maxOf(1, totalChunks / 20) == 0) {
+                                        Log.i(TAG, "Chunk $index downloaded ($completed/$totalChunks - ${percent.toInt()}%)")
+                                    }
+                                    
+                                    onProgress?.invoke(completed, totalChunks, percent)
                                     onChunkDownloaded?.invoke(index, chunkFile)
                                 } else {
                                     synchronized(failedChunkIndices) {
@@ -161,9 +153,9 @@ class ChunkedDownloadManager(
                 Balancer.unregisterOperation()
             }
             
-            // If there are failed chunks but some succeeded, retry failed chunks after all others completed
+            // Retry logic for failed chunks
             if (failedChunkIndices.isNotEmpty() && completedChunks.get() > 0) {
-                Log.i(TAG, "Retrying ${failedChunkIndices.size} failed chunks after successful downloads completed")
+                Log.i(TAG, "Retrying ${failedChunkIndices.size} failed chunks")
                 val retryJobs = failedChunkIndices.toList().map { index ->
                     async {
                         Balancer.withToken(tokens) { token ->
@@ -171,18 +163,16 @@ class ChunkedDownloadManager(
                             val chunkData = downloadSingleChunk(fileId, token, tokens)
                             
                             if (chunkData != null) {
-                                synchronized(chunkDataMap) {
-                                    chunkDataMap[index] = chunkData
-                                }
+                                val chunkFile = File(tempDir, "chunk_${index}.tmp")
+                                chunkFile.writeBytes(chunkData)
+                                
                                 val completed = completedChunks.incrementAndGet()
                                 val percent = completed.toFloat() / totalChunks * 100
-                                Log.i(TAG, "Chunk $index retry succeeded ($completed/$totalChunks - ${percent.toInt()}%)")
+                                Log.i(TAG, "Chunk $index retry succeeded")
                                 onProgress?.invoke(completed, totalChunks, percent)
+                                
                                 synchronized(failedChunkIndices) {
                                     failedChunkIndices.remove(index)
-                                }
-                                synchronized(errors) {
-                                    errors.removeIf { it.contains("Chunk $index") }
                                 }
                             } else {
                                 Log.w(TAG, "Chunk $index retry also failed")
@@ -198,22 +188,39 @@ class ChunkedDownloadManager(
                 return@withContext ChunkDownloadResult(
                     success = false,
                     outputFile = null,
-                    error = "Failed chunks: ${errors.joinToString()}"
+                    error = "Failed chunks: ${failedChunkIndices.size}"
                 )
             }
             
-            // Reassemble chunks
+            // Reassemble chunks FROM DISK (Streaming) to prevent OOM
             Log.i(TAG, "Reassembling ${totalChunks} chunks...")
             FileOutputStream(outputFile).use { output ->
                 for (i in 0 until totalChunks) {
-                    val chunkData = chunkDataMap[i] 
-                        ?: throw Exception("Missing chunk $i")
-                    output.write(chunkData)
+                    val chunkFile = File(tempDir, "chunk_${i}.tmp")
+                    if (!chunkFile.exists()) {
+                        throw Exception("Missing chunk file: ${chunkFile.absolutePath}")
+                    }
+                    
+                    // Stream copy: Read file -> Write to output -> Close input
+                    // This uses minimal memory (buffer size)
+                    chunkFile.inputStream().use { input ->
+                        input.copyTo(output)
+                    }
+                    
+                    // Delete chunk to free space immediately (optional, keeping for safety until done)
+                    // chunkFile.delete() 
                 }
             }
             
             Log.i(TAG, "Chunked download completed: ${outputFile.absolutePath}")
             Log.i(TAG, "Final file size: ${outputFile.length()} bytes")
+            
+            // Cleanup temp directory
+            try {
+                tempDir.deleteRecursively()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to cleanup temp dir: ${e.message}")
+            }
             
             ChunkDownloadResult(
                 success = true,
@@ -222,15 +229,13 @@ class ChunkedDownloadManager(
             
         } catch (e: Exception) {
             Log.e(TAG, "Chunked download failed", e)
-            // Don't delete temp directory on failure - allow resumption
             ChunkDownloadResult(
                 success = false,
                 outputFile = null,
                 error = e.message
             )
         }
-        // Note: tempDir is NOT deleted here to allow resumption
-        // It should be deleted after successful completion or by cleanup mechanism
+        // Note: tempDir is NOT deleted on failure to allow resumption
     }
     
     /**

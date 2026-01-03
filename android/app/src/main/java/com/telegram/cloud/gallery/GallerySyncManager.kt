@@ -21,6 +21,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -109,45 +110,51 @@ class GallerySyncManager(
         val semaphore = kotlinx.coroutines.sync.Semaphore(MAX_PARALLEL_UPLOADS)
 
         try {
-            val jobs = unsynced.map { media ->
-                async {
-                    semaphore.withPermit {
-                        ensureActive()
-                        
-                        // Update UI to show this file is starting
-                        _currentFileName.value = media.filename
-                        val currentCompleted = completedCount.get()
-                        _syncState.value = SyncState.Syncing(media.filename, currentCompleted + 1, total)
-                        onProgress?.invoke(currentCompleted + 1, total, media.filename)
-                        
-                        activeProgresses[media.filename] = 0f
-                        
-                        val result = uploadMedia(media, config.channelId, tokens) { progress ->
-                            activeProgresses[media.filename] = progress
+            // Process in batches to avoid overheating/OOM
+            // Chunking limits the number of active coroutine objects
+            val batchSize = 20 // Smaller batch for heavier network ops
+            unsynced.chunked(batchSize).forEach { batch ->
+                val jobs = batch.map { media ->
+                    async {
+                        semaphore.withPermit {
+                            ensureActive()
                             
-                            // Calculate global progress
-                            val currentActiveSum = activeProgresses.values.sum()
-                            val globalProgress = (completedCount.get() + currentActiveSum) / total
+                            // Update UI to show this file is starting
+                            _currentFileName.value = media.filename
+                            val currentCompleted = completedCount.get()
+                            _syncState.value = SyncState.Syncing(media.filename, currentCompleted + 1, total)
+                            onProgress?.invoke(currentCompleted + 1, total, media.filename)
+                            
+                            activeProgresses[media.filename] = 0f
+                            
+                            val result = uploadMedia(media, config.channelId, tokens) { progress ->
+                                activeProgresses[media.filename] = progress
+                                
+                                // Calculate global progress
+                                val currentActiveSum = activeProgresses.values.sum()
+                                val globalProgress = (completedCount.get() + currentActiveSum) / total
+                                _syncProgress.value = globalProgress
+                            }
+                            
+                            activeProgresses.remove(media.filename)
+                            completedCount.incrementAndGet()
+                            
+                            if (result) {
+                                successCount.incrementAndGet()
+                            } else {
+                                failureCount.incrementAndGet()
+                            }
+                            
+                            // Final progress update for this step
+                            val globalProgress = completedCount.get().toFloat() / total
                             _syncProgress.value = globalProgress
                         }
-                        
-                        activeProgresses.remove(media.filename)
-                        completedCount.incrementAndGet()
-                        
-                        if (result) {
-                            successCount.incrementAndGet()
-                        } else {
-                            failureCount.incrementAndGet()
-                        }
-                        
-                        // Final progress update for this step
-                        val globalProgress = completedCount.get().toFloat() / total
-                        _syncProgress.value = globalProgress
                     }
                 }
+                jobs.awaitAll()
+                // Yield to allow other tasks/UI to process
+                kotlinx.coroutines.yield()
             }
-            
-            jobs.awaitAll()
 
             val failures = failureCount.get()
             val success = successCount.get()
