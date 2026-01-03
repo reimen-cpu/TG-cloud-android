@@ -1,7 +1,10 @@
-<div style="display: flex; gap: 10px;">
-
-  <img src="https://github.com/reimen-cpu/TG-cloud-android/blob/main/android/img/Captura%20de%20pantalla%202025-12-31%20190501.png" width="300">
-  
+<div style="display: flex; overflow-x: auto; gap: 15px; padding: 20px 0; justify-content: flex-start; align-items: center;">
+  <img src="android/img/principal.jpg" height="500" alt="Main Screen" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+  <img src="android/img/photo_2_2026-01-03_03-57-36.jpg" height="500" alt="Wizard Step 1" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+  <img src="android/img/photo_3_2026-01-03_03-57-36.jpg" height="500" alt="Wizard Step 2" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+  <img src="android/img/photo_4_2026-01-03_03-57-36.jpg" height="500" alt="Wizard Step 3" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+  <img src="android/img/photo_5_2026-01-03_03-57-36.jpg" height="500" alt="Wizard Step 4" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+  <img src="android/img/photo_6_2026-01-03_03-57-36.jpg" height="500" alt="Wizard Step 5" style="border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
 </div>
 
 
