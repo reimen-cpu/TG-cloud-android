@@ -15,12 +15,15 @@ import com.telegram.cloud.tasks.TaskQueueManager
 import com.telegram.cloud.utils.ResourceGuard
 import com.telegram.cloud.data.sync.SyncLogManager
 import com.telegram.cloud.data.sync.SyncConfig
+import com.telegram.cloud.data.remote.UploadCancellationManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlin.coroutines.coroutineContext
 
 class UploadWorker(
     private val context: Context,
@@ -44,8 +47,14 @@ class UploadWorker(
         val taskId = inputData.getString(KEY_TASK_ID)
         val taskQueueManager = (context.applicationContext as TelegramCloudApp).container.taskQueueManager
         
+        // Register this coroutine's Job for cancellation support
+        val currentJob = coroutineContext[Job]
+        if (taskId != null && currentJob != null) {
+            UploadCancellationManager.registerJob(taskId, currentJob)
+        }
+        
         return try {
-            Log.d(TAG, "Starting upload worker...")
+            Log.d(TAG, "Starting upload worker for task $taskId...")
             
             // Get parameters
             val uri = inputData.getString(KEY_URI) ?: return Result.failure()
@@ -217,7 +226,10 @@ class UploadWorker(
             repository.reloadFilesFromDatabase()
             
             Log.d(TAG, "Upload worker completed successfully, files cache reloaded, marking task $taskId as completed")
-            taskId?.let { taskQueueManager.markUploadTaskCompleted(it) }
+            taskId?.let { 
+                UploadCancellationManager.unregisterJob(it)
+                taskQueueManager.markUploadTaskCompleted(it) 
+            }
             Result.success()
             
         } catch (e: CancellationException) {
@@ -229,7 +241,10 @@ class UploadWorker(
             Log.e(TAG, "Error in upload worker", e)
             SyncNotificationManager.cancelNotification(context, SyncNotificationManager.OperationType.UPLOAD)
             ResourceGuard.markIdle(ResourceGuard.Feature.MANUAL_SYNC)
-            taskId?.let { taskQueueManager.markUploadTaskFailed(it, e.message) }
+            taskId?.let { 
+                UploadCancellationManager.unregisterJob(it)
+                taskQueueManager.markUploadTaskFailed(it, e.message) 
+            }
             Result.failure()
         } finally {
             ResourceGuard.markIdle(ResourceGuard.Feature.MANUAL_SYNC)

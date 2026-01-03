@@ -40,8 +40,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileNotFoundException
@@ -77,6 +79,9 @@ class TelegramRepository(
     private val _filesCache = MutableStateFlow<List<CloudFile>>(emptyList())
     
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    
+    // Track active upload jobs for cancellation support
+    private val activeUploadJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
     
     // Inicializar cache al crear el repository
     init {
@@ -259,6 +264,20 @@ class TelegramRepository(
     }
 
     suspend fun saveConfig(config: BotConfig) = configStore.save(config)
+    
+    /**
+     * Cancel an active upload by its task queue ID.
+     * This cancels the coroutine job, which propagates to ChunkedUploadManager.
+     */
+    fun cancelUpload(taskQueueId: String) {
+        val job = activeUploadJobs.remove(taskQueueId)
+        if (job != null) {
+            Log.i(TAG, "cancelUpload: Cancelling upload for task $taskQueueId")
+            job.cancel()
+        } else {
+            Log.w(TAG, "cancelUpload: No active job found for task $taskQueueId")
+        }
+    }
 
     suspend fun upload(request: UploadRequest, onProgress: ((Float) -> Unit)? = null) {
         Log.i(TAG, "upload: Starting upload for ${request.displayName} (${request.sizeBytes} bytes)")
@@ -293,7 +312,6 @@ class TelegramRepository(
             val uri = Uri.parse(request.uri)
             Log.i(TAG, "upload: Parsed URI=$uri")
             
-            // Verify we can open the stream
             val testStream = context.contentResolver.openInputStream(uri)
             if (testStream == null) {
                 Log.e(TAG, "upload: Cannot open input stream for URI!")
@@ -302,19 +320,20 @@ class TelegramRepository(
             testStream.close()
             Log.i(TAG, "upload: Stream test passed")
             
-            val checksum = checksum(context.contentResolver, uri)
-            Log.i(TAG, "upload: Checksum calculated=${checksum?.take(16)}...")
-            
             val mimeType = context.contentResolver.getType(uri)
             Log.i(TAG, "upload: MimeType=$mimeType")
 
             // Check if file needs chunked upload (> 4MB)
             if (request.sizeBytes > CHUNK_THRESHOLD) {
+                // For chunked uploads, skip full-file checksum - each chunk has its own hash
                 Log.i(TAG, "upload: File exceeds ${CHUNK_THRESHOLD / 1024 / 1024}MB, using chunked upload")
-                uploadChunked(request, cfg, taskId, uri, checksum, mimeType, onProgress)
+                Log.i(TAG, "upload: Skipping full-file checksum (each chunk has its own hash)")
+                uploadChunked(request, cfg, taskId, uri, null, mimeType, onProgress)
             } else {
                 Log.i(TAG, "upload: File is small, using direct upload")
-                uploadDirect(request, cfg, taskId, uri, checksum, mimeType, onProgress)
+                // For direct uploads: start upload immediately, calculate checksum in parallel
+                // This eliminates delay before upload starts
+                uploadDirectWithAsyncChecksum(request, cfg, taskId, uri, mimeType, onProgress)
             }
 
             database.uploadTaskDao().getById(taskId)?.let {
@@ -335,6 +354,123 @@ class TelegramRepository(
             }
             throw ex
         }
+    }
+    
+    /**
+     * Uploads a file directly, calculating checksum in parallel to avoid startup delay.
+     * The upload starts immediately while checksum is calculated in background.
+     * After both complete, the database is updated with the checksum.
+     */
+    private suspend fun uploadDirectWithAsyncChecksum(
+        request: UploadRequest,
+        cfg: BotConfig,
+        taskId: Long,
+        uri: Uri,
+        mimeType: String?,
+        onProgress: ((Float) -> Unit)? = null
+    ) {
+        Log.i(TAG, "uploadDirectWithAsyncChecksum: Starting upload immediately (checksum in parallel)")
+        
+        // Start checksum calculation in background coroutine using repositoryScope
+        val checksumDeferred = repositoryScope.async(Dispatchers.IO) {
+            try {
+                val cs = checksum(context.contentResolver, uri)
+                Log.i(TAG, "uploadDirectWithAsyncChecksum: Checksum calculated=${cs?.take(16)}...")
+                cs
+            } catch (e: Exception) {
+                Log.e(TAG, "uploadDirectWithAsyncChecksum: Checksum calculation failed", e)
+                null
+            }
+        }
+        
+        // Start upload immediately (don't wait for checksum)
+        val selectedToken = cfg.tokens.randomOrNull() ?: cfg.tokens.first()
+        Log.i(TAG, "uploadDirectWithAsyncChecksum: Selected token=${selectedToken.take(20)}...")
+
+        val totalBytes = request.sizeBytes
+        Log.i(TAG, "uploadDirectWithAsyncChecksum: Total bytes=$totalBytes")
+
+        Log.i(TAG, "uploadDirectWithAsyncChecksum: Calling botClient.sendDocument...")
+        val message = botClient.sendDocument(
+            token = selectedToken,
+            channelId = cfg.channelId,
+            caption = request.caption,
+            fileName = request.displayName,
+            mimeType = mimeType,
+            streamProvider = {
+                Log.i(TAG, "uploadDirectWithAsyncChecksum: streamProvider called, opening stream...")
+                context.contentResolver.openInputStream(uri)
+                    ?: error("No se pudo abrir el archivo a subir")
+            },
+            totalBytes = totalBytes,
+            onProgress = { bytesWritten, total ->
+                val progress = if (total > 0) {
+                    (bytesWritten.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
+                val progressPercent = (progress * 100f).toInt()
+                
+                // Actualizar progreso en base de datos de forma asíncrona
+                repositoryScope.launch {
+                    database.uploadTaskDao().getById(taskId)?.let {
+                        database.uploadTaskDao().update(it.copy(progress = progressPercent))
+                    }
+                }
+                
+                // Emitir progreso al callback
+                onProgress?.invoke(progress)
+                
+                Log.d(TAG, "uploadDirectWithAsyncChecksum: Progress $bytesWritten/$total bytes (${progressPercent}%)")
+            }
+        )
+        Log.i(TAG, "uploadDirectWithAsyncChecksum: sendDocument completed, messageId=${message.messageId}")
+
+        val document = message.document
+        if (document == null) {
+            Log.e(TAG, "uploadDirectWithAsyncChecksum: Response has no document!")
+            error("Respuesta sin documento")
+        }
+        Log.i(TAG, "uploadDirectWithAsyncChecksum: Document fileId=${document.fileId}")
+        
+        // Wait for checksum to complete (should be done by now or very soon)
+        val checksum = checksumDeferred.await()
+        Log.i(TAG, "uploadDirectWithAsyncChecksum: Checksum ready, saving to database")
+        
+        val shareLink = buildShareLink(cfg.channelId, message.messageId)
+        Log.i(TAG, "uploadDirectWithAsyncChecksum: ShareLink=$shareLink")
+
+        val entityToInsert = CloudFileEntity(
+            telegramMessageId = message.messageId,
+            fileId = document.fileId,
+            fileUniqueId = document.fileUniqueId,
+            fileName = document.fileName ?: request.displayName,
+            mimeType = document.mimeType ?: mimeType,
+            sizeBytes = document.fileSize ?: request.sizeBytes,
+            uploadedAt = System.currentTimeMillis(),
+            caption = request.caption,
+            shareLink = shareLink,
+            checksum = checksum,
+            uploaderTokens = selectedToken
+        )
+        
+        val insertedId = database.cloudFileDao().insert(entityToInsert)
+        
+        // Generate sync log for the INSERT operation
+        val insertedEntity = entityToInsert.copy(id = insertedId)
+        generateSyncLogForInsert(insertedEntity)
+        
+        // Recargar archivos desde la base de datos inmediatamente
+        reloadFilesFromDatabase()
+        Log.i(TAG, "uploadDirectWithAsyncChecksum: File saved to database and cache reloaded")
+        
+        markGalleryMediaSyncedDirect(
+            request = request,
+            mimeType = document.mimeType ?: mimeType,
+            fileId = document.fileId,
+            messageId = message.messageId,
+            uploaderToken = selectedToken
+        )
     }
     
     private suspend fun uploadDirect(
@@ -1391,7 +1527,8 @@ class TelegramRepository(
             database.uploadTaskDao().update(task.copy(status = UploadStatus.RUNNING, error = null))
             
             val uri = Uri.parse(request.uri)
-            val checksum = checksum(context.contentResolver, uri)
+            // Skip checksum for resumed uploads (always chunked) - each chunk already has its own hash
+            val checksum: String? = null // Each chunk calculates its own hash during streaming
             val mimeType = context.contentResolver.getType(uri)
             
             // Call uploadChunked which will detect and resume from existing progress

@@ -1,6 +1,8 @@
 package com.telegram.cloud.data.remote
 
 import android.util.Log
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -192,44 +194,76 @@ class TelegramBotClient(
                 Log.i(TAG, "sendDocument: Executing HTTP request...")
                 var attempt = 0
                 var message: TelegramMessage? = null
+                
                 retry@ while (message == null) {
                     attempt++
-                    var waitMillisForRetry: Long? = null
-                try {
-                    httpClient.newCall(request).execute().use { response ->
-                        Log.i(TAG, "sendDocument: Response code=${response.code}")
-                        val body = response.body?.string() ?: error("Respuesta vacía de Telegram")
-                        Log.i(TAG, "sendDocument: Response body (first 500 chars): ${body.take(500)}")
-                            if (response.isSuccessful) {
-                                val parsed = parseMessage(body)
-                                Log.i(TAG, "sendDocument: Success! messageId=${parsed.messageId}")
-                                message = parsed
-                                return@use
+                    // Use AtomicReference to avoid "captured by changing closure" error for smart casts
+                    val waitMillisRef = java.util.concurrent.atomic.AtomicReference<Long?>(null)
+                    
+                    try {
+                        // Use suspendCancellableCoroutine to properly handle cancellation during the blocking network call
+                        message = kotlinx.coroutines.suspendCancellableCoroutine<TelegramMessage?> { continuation ->
+                            val call = httpClient.newCall(request)
+                            
+                            // Cancel the call if the coroutine is cancelled
+                            continuation.invokeOnCancellation {
+                                Log.i(TAG, "sendDocument: Coroutine cancelled, cancelling OkHttp call")
+                                call.cancel()
                             }
-
-                            if (response.code == 429) {
-                                val retryAfterMillis = registerRetryAfterDelay(token, body)
-                                val waitMillis = maxOf(retryAfterMillis, RATE_LIMIT_INTERVAL_MS)
-                                Log.w(
-                                    TAG,
-                                    "sendDocument: rate limited; retrying after ${waitMillis}ms (attempt $attempt)"
-                                )
-                                waitMillisForRetry = waitMillis
-                                return@use
+                            
+                            try {
+                                val response = call.execute()
+                                response.use { resp ->
+                                    Log.i(TAG, "sendDocument: Response code=${resp.code}")
+                                    val body = resp.body?.string() ?: throw java.io.IOException("Empty response body")
+                                    
+                                    if (resp.isSuccessful) {
+                                        val parsed = parseMessage(body)
+                                        Log.i(TAG, "sendDocument: Success! messageId=${parsed.messageId}")
+                                        // Use standard resume extension from kotlin.coroutines
+                                        continuation.resume(parsed)
+                                    } else {
+                                        if (resp.code == 429) {
+                                            val retryAfterMillis = registerRetryAfterDelay(token, body)
+                                            val waitMillis = maxOf(retryAfterMillis, RATE_LIMIT_INTERVAL_MS)
+                                            Log.w(TAG, "sendDocument: rate limited; retrying after ${waitMillis}ms (attempt $attempt)")
+                                            waitMillisRef.set(waitMillis)
+                                            continuation.resume(null)
+                                        } else {
+                                            registerRetryAfterDelay(token, body)
+                                            Log.e(TAG, "sendDocument: HTTP error ${resp.code}: $body")
+                                            continuation.resumeWithException(java.io.IOException("Telegram error: $body"))
+                                        }
+                                    }
+                                }
+                            } catch (e: java.io.IOException) {
+                                if (call.isCanceled()) {
+                                    // Normally we would rethrow CancellationException, but resumeWithException works too
+                                    continuation.cancel(e)
+                                } else {
+                                    Log.e(TAG, "sendDocument: Network error", e)
+                                    continuation.resumeWithException(e)
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "sendDocument: Unexpected error", e)
+                                continuation.resumeWithException(e)
                             }
-
-                            registerRetryAfterDelay(token, body)
-                            Log.e(TAG, "sendDocument: HTTP error ${response.code}: $body")
-                            error("Telegram error: $body")
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "sendDocument: Exception during upload", e)
-                    throw e
-                }
-                    val waitMillis = waitMillisForRetry
-                    if (waitMillis != null) {
-                        delay(waitMillis)
-                        continue@retry
+                        }
+                        
+                        // If we got a message, return it
+                        if (message != null) return@withContext message
+                        
+                        // Check if we need to wait and retry
+                        val waitMillis = waitMillisRef.get()
+                        if (waitMillis != null) {
+                            delay(waitMillis)
+                            continue@retry
+                        }
+                        
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        Log.e(TAG, "sendDocument: Exception during upload", e)
+                        throw e
                     }
                 }
                 return@withContext message!!
@@ -435,6 +469,97 @@ class TelegramBotClient(
                         }
                         registerRetryAfterDelay(token, body)
                         Log.e(TAG, "sendChunk: Failed: $body")
+                        error("Telegram error: $body")
+                    }
+                    val waitMillis = waitMillisForRetry
+                    if (waitMillis != null) {
+                        delay(waitMillis)
+                        continue@retryChunk
+                    }
+                }
+                return@withContext message!!
+            }
+        }
+
+    /**
+     * Sends a chunk using streaming - reads from InputStream in small buffers.
+     * This is the memory-efficient version that doesn't load the entire chunk into memory.
+     * 
+     * @param token Bot token
+     * @param channelId Target channel/chat ID
+     * @param streamingBody Pre-configured StreamingChunkRequestBody (hash already calculated)
+     * @param chunkFileName Name for this chunk file
+     * @param chunkIndex Index of this chunk (0-based)
+     * @param totalChunks Total number of chunks
+     * @param originalFileName Original file name
+     * @param fileId UUID for this upload
+     * @param chunkHash Pre-calculated hash of the chunk
+     */
+    suspend fun sendChunkStreaming(
+        token: String,
+        channelId: String,
+        streamingBody: StreamingChunkRequestBody,
+        chunkFileName: String,
+        chunkIndex: Int,
+        totalChunks: Int,
+        originalFileName: String,
+        fileId: String,
+        chunkHash: String
+    ): TelegramMessage =
+        rateLimiter.execute(token, channelId) {
+            withContext(Dispatchers.IO) {
+                val url = "https://api.telegram.org/bot$token/sendDocument"
+                Log.i(TAG, "sendChunkStreaming: Uploading chunk $chunkIndex/$totalChunks for $originalFileName (streaming)")
+
+                // Caption with chunk metadata for reconstruction
+                val caption = buildString {
+                    append("[CHUNK]")
+                    append("|fileId:$fileId")
+                    append("|chunk:$chunkIndex")
+                    append("|total:$totalChunks")
+                    append("|name:$originalFileName")
+                    append("|hash:$chunkHash")
+                }
+
+                val multipart = MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart("chat_id", channelId)
+                    .addFormDataPart("document", chunkFileName, streamingBody)
+                    .addFormDataPart("caption", caption)
+                    .build()
+
+                val request = Request.Builder()
+                    .url(url)
+                    .post(multipart)
+                    .build()
+
+                // Use chunkHttpClient for chunk uploads (1 minute timeout)
+                var attempt = 0
+                var message: TelegramMessage? = null
+                retryChunk@ while (message == null) {
+                    attempt++
+                    var waitMillisForRetry: Long? = null
+                    chunkHttpClient.newCall(request).execute().use { response ->
+                        val body = response.body?.string() ?: error("Empty response")
+                        if (response.isSuccessful) {
+                            val parsed = parseMessage(body)
+                            Log.i(TAG, "sendChunkStreaming: Chunk $chunkIndex uploaded, messageId=${parsed.messageId}")
+                            message = parsed
+                            return@use
+                        }
+
+                        if (response.code == 429) {
+                            val retryAfterMillis = registerRetryAfterDelay(token, body)
+                            val waitMillis = maxOf(retryAfterMillis, RATE_LIMIT_INTERVAL_MS)
+                            Log.w(
+                                TAG,
+                                "sendChunkStreaming: rate limited; retrying after ${waitMillis}ms (attempt $attempt)"
+                            )
+                            waitMillisForRetry = waitMillis
+                            return@use
+                        }
+                        registerRetryAfterDelay(token, body)
+                        Log.e(TAG, "sendChunkStreaming: Failed: $body")
                         error("Telegram error: $body")
                     }
                     val waitMillis = waitMillisForRetry

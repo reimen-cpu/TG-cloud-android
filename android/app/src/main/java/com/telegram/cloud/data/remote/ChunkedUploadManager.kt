@@ -4,13 +4,9 @@ import android.content.ContentResolver
 import android.net.Uri
 import android.util.Log
 import kotlinx.coroutines.*
-import java.io.IOException
-import java.io.InputStream
-import java.net.SocketTimeoutException
-import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLong
+
 
 private const val TAG = "ChunkedUploadManager"
 
@@ -81,69 +77,98 @@ class ChunkedUploadManager(
         Log.i(TAG, "  Token offset: $tokenOffset")
         
         val completedChunks = AtomicInteger(0)
-        val uploadedBytes = AtomicLong(0)
         val chunkInfos = mutableListOf<ChunkInfo>()
         val errors = mutableListOf<String>()
         
-        // Upload chunks in parallel using all available bots (round-robin like desktop)
-        val parallelism = tokens.size // Use all bots
-        val semaphore = kotlinx.coroutines.sync.Semaphore(parallelism)
-        Log.i(TAG, "Using parallelism: $parallelism (${tokens.size} bots)")
+        // Use global Balancer for token management across all concurrent operations
+        // This prevents rate limiting when multiple chunked uploads run simultaneously
+        Log.i(TAG, "Using global Balancer with ${tokens.size} tokens")
         
         // Filter out already completed chunks
         val chunksToUpload = (0 until totalChunks).filter { it !in skipChunks }
         val initialCompleted = skipChunks.size
         
+        // Register completion of resuming logic
         if (skipChunks.isNotEmpty()) {
             Log.i(TAG, "Resuming upload: skipping ${skipChunks.size} already completed chunks")
             completedChunks.set(initialCompleted)
         }
-        
-        val jobs = chunksToUpload.map { chunkIndex ->
-            async {
-                semaphore.acquire()
-                try {
-                    // Round-robin: assign token based on chunk index (same as desktop)
-                    val tokenIndex = (chunkIndex + tokenOffset) % tokens.size
-                    val token = tokens[tokenIndex]
-                    
-                    Log.d(TAG, "Chunk $chunkIndex using token index $tokenIndex (offset $tokenOffset)")
-                    
-                    val chunkResult = uploadSingleChunk(
-                        uri = uri,
-                        fileId = fileId,
-                        fileName = fileName,
-                        chunkIndex = chunkIndex,
-                        totalChunks = totalChunks,
-                        fileSize = fileSize,
-                        token = token,
-                        channelId = channelId
-                    )
-                    
-                    if (chunkResult != null) {
-                        synchronized(chunkInfos) {
-                            chunkInfos.add(chunkResult)
-                        }
-                        val completed = completedChunks.incrementAndGet()
-                        val percent = completed.toFloat() / totalChunks * 100
-                        Log.i(TAG, "Chunk $chunkIndex completed ($completed/$totalChunks - ${percent.toInt()}%)")
-                        onProgress?.invoke(completed, totalChunks, percent)
-                        
-                        // Notify callback for progress persistence
-                        onChunkCompleted?.invoke(chunkResult)
-                    } else {
-                        synchronized(errors) {
-                            errors.add("Chunk $chunkIndex failed")
-                        }
-                    }
-                } finally {
-                    semaphore.release()
-                }
-            }
+
+        // Register new operation with Balancer to track active load
+        if (!Balancer.registerOperation()) {
+            Log.e(TAG, "Too many concurrent operations, cannot start upload")
+            return@withContext ChunkUploadResult(false, fileId, emptyList(), emptyList(), emptyList(), totalChunks)
         }
         
-        // Wait for all chunks
-        jobs.awaitAll()
+        try {
+            // Use a Channel to distribute chunks fairly across workers
+            // This prevents one upload from monopolizing all token slots
+            val chunkChannel = kotlinx.coroutines.channels.Channel<Int>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+            
+            // Send all chunks to the channel
+            for (chunkIndex in chunksToUpload) {
+                chunkChannel.send(chunkIndex)
+            }
+            chunkChannel.close()
+            
+            // Dynamic worker allocation:
+            // 1 active op -> use all tokens (speed)
+            // Multiple active ops -> split tokens (fairness)
+            val workersPerUpload = Balancer.getWorkersPerOperation(tokens.size)
+            Log.i(TAG, "Using $workersPerUpload concurrent workers for this upload (Active ops: ${Balancer.getActiveOperationCount()})")
+            
+            val workerJobs = (0 until workersPerUpload).map { workerId ->
+                async {
+                    for (chunkIndex in chunkChannel) {
+                        // Check for cancellation before processing chunk
+                        if (com.telegram.cloud.data.remote.UploadCancellationManager.isCancelled(fileId)) {
+                             Log.i(TAG, "Upload cancelled for file $fileId")
+                             throw kotlinx.coroutines.CancellationException("Upload cancelled")
+                        }
+
+                        // Use global Balancer to acquire a token slot (waits if all tokens are busy)
+                        // Pass fileId to enforce fair sharing between concurrent uploads
+                        Balancer.withToken(tokens, operationId = fileId) { token ->
+                            Log.d(TAG, "Worker $workerId: Chunk $chunkIndex acquired token ${token.take(10)}...")
+                            
+                            val chunkResult = uploadSingleChunk(
+                                uri = uri,
+                                fileId = fileId,
+                                fileName = fileName,
+                                chunkIndex = chunkIndex,
+                                totalChunks = totalChunks,
+                                fileSize = fileSize,
+                                token = token,
+                                channelId = channelId
+                            )
+                            
+                            if (chunkResult != null) {
+                                synchronized(chunkInfos) {
+                                    chunkInfos.add(chunkResult)
+                                }
+                                val completed = completedChunks.incrementAndGet()
+                                val percent = completed.toFloat() / totalChunks * 100
+                                Log.i(TAG, "Chunk $chunkIndex completed ($completed/$totalChunks - ${percent.toInt()}%)")
+                                onProgress?.invoke(completed, totalChunks, percent)
+                                
+                                // Notify callback for progress persistence
+                                onChunkCompleted?.invoke(chunkResult)
+                            } else {
+                                synchronized(errors) {
+                                    errors.add("Chunk $chunkIndex failed")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Wait for all workers to complete
+            workerJobs.awaitAll()
+        } finally {
+            // Unregister operation when done (success, failure, or cancelled)
+            Balancer.unregisterOperation()
+        }
         
         val success = completedChunks.get() == totalChunks
         val sortedChunks = chunkInfos.sortedBy { it.index }
@@ -197,42 +222,20 @@ class ChunkedUploadManager(
                 val offset = chunkIndex * CHUNK_SIZE
                 val chunkSize = minOf(CHUNK_SIZE, fileSize - offset).toInt()
                 
-                Log.i(TAG, "Reading chunk $chunkIndex: offset=$offset, size=$chunkSize")
+                Log.i(TAG, "Preparing streaming chunk $chunkIndex: offset=$offset, size=$chunkSize")
                 
-                // Read chunk data - use skip with verification
-                val chunkData = contentResolver.openInputStream(uri)?.use { stream ->
-                    // Skip to offset - some streams don't support skip well, so read and discard
-                    var skipped = 0L
-                    val skipBuffer = ByteArray(8192)
-                    while (skipped < offset) {
-                        val toRead = minOf(skipBuffer.size.toLong(), offset - skipped).toInt()
-                        val read = stream.read(skipBuffer, 0, toRead)
-                        if (read == -1) {
-                            Log.e(TAG, "Chunk $chunkIndex: EOF while skipping at $skipped/$offset")
-                            throw Exception("EOF while skipping to offset $offset")
-                        }
-                        skipped += read
-                    }
-                    Log.d(TAG, "Chunk $chunkIndex: Skipped $skipped bytes")
-                    
-                    // Now read the chunk
-                    val buffer = ByteArray(chunkSize)
-                    var totalRead = 0
-                    while (totalRead < chunkSize) {
-                        val read = stream.read(buffer, totalRead, chunkSize - totalRead)
-                        if (read == -1) break
-                        totalRead += read
-                    }
-                    Log.d(TAG, "Chunk $chunkIndex: Read $totalRead bytes")
-                    buffer.copyOf(totalRead)
-                } ?: throw Exception("Cannot open stream for chunk $chunkIndex")
+                // Create streaming RequestBody - no ByteArray allocation!
+                // This reads the data in 8KB buffers directly to the network sink
+                val streamingBody = StreamingChunkRequestBody(
+                    contentResolver = contentResolver,
+                    uri = uri,
+                    offset = offset,
+                    length = chunkSize
+                )
                 
-                if (chunkData.isEmpty()) {
-                    throw Exception("Empty chunk data for chunk $chunkIndex")
-                }
-                
-                // Calculate chunk hash
-                val chunkHash = calculateHash(chunkData)
+                // Calculate hash using streaming (reads in 8KB buffers)
+                val chunkHash = streamingBody.calculateHash()
+                Log.d(TAG, "Chunk $chunkIndex hash calculated: $chunkHash")
                 
                 // Generate chunk filename
                 val chunkFileName = if (totalChunks == 1) {
@@ -241,13 +244,13 @@ class ChunkedUploadManager(
                     "${fileName}.chunk_${chunkIndex}_of_$totalChunks"
                 }
                 
-                Log.i(TAG, "Uploading chunk $chunkIndex (${chunkData.size} bytes) with token ${token.take(15)}...")
+                Log.i(TAG, "Uploading chunk $chunkIndex ($chunkSize bytes, streaming) with token ${token.take(15)}...")
                 
-                // Upload chunk with retry handled by botClient
-                val message = botClient.sendChunk(
+                // Upload chunk using streaming - data is read directly from InputStream
+                val message = botClient.sendChunkStreaming(
                     token = token,
                     channelId = channelId,
-                    chunkData = chunkData,
+                    streamingBody = streamingBody,
                     chunkFileName = chunkFileName,
                     chunkIndex = chunkIndex,
                     totalChunks = totalChunks,
@@ -272,7 +275,7 @@ class ChunkedUploadManager(
                 
                 // Determine if error is recoverable
                 val isRecoverable = when (e) {
-                    is IOException, is SocketTimeoutException -> true
+                    is java.io.IOException, is java.net.SocketTimeoutException -> true
                     else -> {
                         // Check for specific HTTP error codes in message
                         val message = e.message ?: ""
@@ -427,11 +430,7 @@ class ChunkedUploadManager(
         }
     }
     
-    private fun calculateHash(data: ByteArray): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        val hash = digest.digest(data)
-        return hash.joinToString("") { "%02x".format(it) }.take(16)
-    }
+
     
     companion object {
         /**

@@ -81,68 +81,93 @@ class ChunkedDownloadManager(
         }
         
         try {
-            // Use all available bots in parallel (round-robin like desktop)
-            // Each bot handles its own chunks to avoid rate limiting per bot
-            val parallelism = tokens.size
-            val semaphore = kotlinx.coroutines.sync.Semaphore(parallelism)
-            Log.i(TAG, "Using parallelism: $parallelism (${tokens.size} bots)")
-            
-            val jobs = chunkFileIds.mapIndexed { index, fileId ->
-                // Skip if already completed
-                if (index in skipChunks) {
-                    return@mapIndexed null
+            // Use global Balancer for token management across all concurrent operations
+            // This prevents rate limiting when multiple chunked operations run simultaneously
+            Log.i(TAG, "Using global Balancer with ${tokens.size} tokens")
+
+            // Register new operation with Balancer to track active load
+            if (!Balancer.registerOperation()) {
+                Log.e(TAG, "Too many concurrent operations, cannot start download")
+                return@withContext ChunkDownloadResult(false, outputFile, "Too many concurrent operations")
+            }
+
+            try {
+                // Create list of chunks to download (excluding skipped)
+                val chunksToDownload = chunkFileIds.mapIndexedNotNull { index, fileId ->
+                    if (index in skipChunks) null else Pair(index, fileId)
                 }
                 
-                async {
-                    semaphore.acquire()
-                    try {
-                        // Round-robin: assign token based on chunk index (same as desktop)
-                        val token = tokens[index % tokens.size]
-                        val chunkData = downloadSingleChunk(fileId, token, tokens)
-                        
-                        if (chunkData != null) {
-                            // Save chunk to disk immediately
-                            val chunkFile = File(tempDir, "chunk_${index}.tmp")
-                            chunkFile.writeBytes(chunkData)
-                            Log.d(TAG, "Saved chunk $index to disk: ${chunkFile.absolutePath}")
-                            
-                            synchronized(chunkDataMap) {
-                                chunkDataMap[index] = chunkData
-                            }
-                            val completed = completedChunks.incrementAndGet()
-                            val percent = completed.toFloat() / totalChunks * 100
-                            Log.i(TAG, "Chunk $index downloaded ($completed/$totalChunks - ${percent.toInt()}%)")
-                            onProgress?.invoke(completed, totalChunks, percent)
-                            
-                            // Notify callback for progress persistence
-                            onChunkDownloaded?.invoke(index, chunkFile)
-                        } else {
-                            synchronized(failedChunkIndices) {
-                                failedChunkIndices.add(index)
-                            }
-                            synchronized(errors) {
-                                errors.add("Chunk $index failed")
+                // Use a Channel to distribute chunks fairly across workers
+                val chunkChannel = kotlinx.coroutines.channels.Channel<Pair<Int, String>>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+                
+                // Send all chunks to the channel
+                for (chunk in chunksToDownload) {
+                    chunkChannel.send(chunk)
+                }
+                chunkChannel.close()
+                
+                // Dynamic worker allocation:
+                // 1 active op -> use all tokens (speed)
+                // Multiple active ops -> split tokens (fairness)
+                val workersPerDownload = Balancer.getWorkersPerOperation(tokens.size)
+                Log.i(TAG, "Using $workersPerDownload concurrent workers for this download (Active ops: ${Balancer.getActiveOperationCount()})")
+                
+                val workerJobs = (0 until workersPerDownload).map { workerId ->
+                    async {
+                        for ((index, fileId) in chunkChannel) {
+                            // Check for cancellation
+                            // Download jobs are attached to the parent scope, so standard cancellation works,
+                            // but explicit check is safer for long running loops
+                            ensureActive()
+
+                            // Use global Balancer to acquire a token slot
+                            // Pass output file name as operation ID for fairness
+                            Balancer.withToken(tokens, operationId = outputFile.name) { token ->
+                                val chunkData = downloadSingleChunk(fileId, token, tokens)
+                                
+                                if (chunkData != null) {
+                                    // Save chunk to disk immediately
+                                    val chunkFile = File(tempDir, "chunk_${index}.tmp")
+                                    chunkFile.writeBytes(chunkData)
+                                    Log.d(TAG, "Saved chunk $index to disk: ${chunkFile.absolutePath}")
+                                    
+                                    synchronized(chunkDataMap) {
+                                        chunkDataMap[index] = chunkData
+                                    }
+                                    val completed = completedChunks.incrementAndGet()
+                                    val percent = completed.toFloat() / totalChunks * 100
+                                    Log.i(TAG, "Chunk $index downloaded ($completed/$totalChunks - ${percent.toInt()}%)")
+                                    onProgress?.invoke(completed, totalChunks, percent)
+                                    
+                                    // Notify callback for progress persistence
+                                    onChunkDownloaded?.invoke(index, chunkFile)
+                                } else {
+                                    synchronized(failedChunkIndices) {
+                                        failedChunkIndices.add(index)
+                                    }
+                                    synchronized(errors) {
+                                        errors.add("Chunk $index failed")
+                                    }
+                                }
                             }
                         }
-                    } finally {
-                        semaphore.release()
                     }
                 }
+                
+                // Wait for all workers to complete
+                workerJobs.awaitAll()
+            } finally {
+                // Unregister operation when done
+                Balancer.unregisterOperation()
             }
-            .filterNotNull()
-            
-            // Wait for all downloads
-            jobs.awaitAll()
             
             // If there are failed chunks but some succeeded, retry failed chunks after all others completed
             if (failedChunkIndices.isNotEmpty() && completedChunks.get() > 0) {
                 Log.i(TAG, "Retrying ${failedChunkIndices.size} failed chunks after successful downloads completed")
-                val retryJobs = failedChunkIndices.map { index ->
+                val retryJobs = failedChunkIndices.toList().map { index ->
                     async {
-                        semaphore.acquire()
-                        try {
+                        Balancer.withToken(tokens) { token ->
                             val fileId = chunkFileIds[index]
-                            val token = tokens[index % tokens.size]
                             val chunkData = downloadSingleChunk(fileId, token, tokens)
                             
                             if (chunkData != null) {
@@ -162,8 +187,6 @@ class ChunkedDownloadManager(
                             } else {
                                 Log.w(TAG, "Chunk $index retry also failed")
                             }
-                        } finally {
-                            semaphore.release()
                         }
                     }
                 }

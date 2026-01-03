@@ -99,6 +99,8 @@ import com.telegram.cloud.R
 import com.telegram.cloud.data.prefs.BotConfig
 import com.telegram.cloud.domain.model.CloudFile
 import com.telegram.cloud.ui.DashboardState
+import com.telegram.cloud.tasks.TaskItem
+import com.telegram.cloud.tasks.TaskType
 import com.telegram.cloud.ui.theme.Spacing
 import com.telegram.cloud.ui.theme.Radius
 import com.telegram.cloud.ui.theme.Elevation
@@ -164,7 +166,9 @@ fun DashboardScreen(
     // Multi-file callbacks
     onDownloadMultiple: (List<CloudFile>) -> Unit = {},
     onShareMultiple: (List<CloudFile>) -> Unit = {},
-    onDeleteMultiple: (List<CloudFile>) -> Unit = {}
+    onDeleteMultiple: (List<CloudFile>) -> Unit = {},
+    // Task cancel callback
+    onCancelTask: (String) -> Unit = {}
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var sortBy by remember { mutableStateOf(SortBy.DATE) }
@@ -695,30 +699,22 @@ fun DashboardScreen(
                 }
             }
 
-            item {
+            // Individual progress cards for each active task
+            // This replaces the single upload/download cards with per-file progress
+            items(
+                items = state.activeTasks,
+                key = { it.id }
+            ) { task ->
                 AnimatedVisibility(
-                    visible = state.isUploading,
+                    visible = true,
                     enter = slideInVertically() + fadeIn(),
                     exit = slideOutVertically() + fadeOut()
                 ) {
                     ProgressCard(
-                        isUpload = true,
-                        fileName = state.currentFileName ?: stringResource(R.string.file_fallback),
-                        progress = state.uploadProgress
-                    )
-                }
-            }
-
-            item {
-                AnimatedVisibility(
-                    visible = state.isDownloading,
-                    enter = slideInVertically() + fadeIn(),
-                    exit = slideOutVertically() + fadeOut()
-                ) {
-                    ProgressCard(
-                        isUpload = false,
-                        fileName = state.currentFileName ?: stringResource(R.string.file_fallback),
-                        progress = state.downloadProgress
+                        isUpload = task.type == TaskType.UPLOAD,
+                        fileName = task.fileName,
+                        progress = task.progress,
+                        onCancel = { onCancelTask(task.id) }
                     )
                 }
             }
@@ -1077,10 +1073,50 @@ private fun SearchBar(
 private fun ProgressCard(
     isUpload: Boolean,
     fileName: String,
-    progress: Float
+    progress: Float,
+    onCancel: (() -> Unit)? = null
 ) {
     // Verde para uploads, azul para downloads
     val color = if (isUpload) AppColors.success else AppColors.download
+    var showCancelDialog by remember { mutableStateOf(false) }
+    
+    // Cancel confirmation dialog
+    if (showCancelDialog) {
+        AlertDialog(
+            onDismissRequest = { showCancelDialog = false },
+            title = {
+                Text(
+                    stringResource(R.string.cancel_operation),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    stringResource(R.string.cancel_operation_confirm, fileName),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showCancelDialog = false
+                        onCancel?.invoke()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFEF5350)
+                    )
+                ) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCancelDialog = false }) {
+                    Text(stringResource(R.string.continue_operation))
+                }
+            }
+        )
+    }
     
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
@@ -1127,6 +1163,25 @@ private fun ProgressCard(
                     fontWeight = FontWeight.Bold,
                     color = color
                 )
+                // Cancel button (red square)
+                if (onCancel != null) {
+                    Spacer(Modifier.width(Spacing.sm))
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFFEF5350))
+                            .clickable { showCancelDialog = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Stop,
+                            contentDescription = stringResource(R.string.cancel),
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
             }
             Spacer(Modifier.height(Spacing.sm))
             LinearProgressIndicator(

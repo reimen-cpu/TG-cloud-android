@@ -40,6 +40,7 @@ import com.telegram.cloud.data.sync.SyncEngine
 import com.telegram.cloud.data.sync.SyncLogManager
 import com.telegram.cloud.data.sync.ConflictResolver
 import com.telegram.cloud.data.remote.TelegramBotClient
+import com.telegram.cloud.tasks.TaskItem
 
 data class DashboardState(
     val files: List<CloudFile> = emptyList(),
@@ -50,6 +51,8 @@ data class DashboardState(
     val currentFileName: String? = null,
     val isConfigLoaded: Boolean = false,
     val isSyncing: Boolean = false,
+    // Active tasks for individual progress bars per file
+    val activeTasks: List<TaskItem> = emptyList(),
     // Gallery sync state
     val isGallerySyncing: Boolean = false,
     val gallerySyncProgress: Float = 0f,
@@ -149,6 +152,15 @@ class MainViewModel(
                 }
             }
         }
+        // Listen for individual task completions to reload file list immediately
+        viewModelScope.launch {
+            taskQueueManager.taskCompletedEvents.collect { task ->
+                Log.i("MainViewModel", "Task completed: ${task.fileName}, reloading file list")
+                // Small delay to ensure database write is complete
+                kotlinx.coroutines.delay(100)
+                repository.reloadFilesFromDatabase()
+            }
+        }
     }
 
     val dashboardState: StateFlow<DashboardState> = combine(
@@ -159,9 +171,15 @@ class MainViewModel(
         _downloadProgress,
         _currentFileName,
         _configLoaded,
-        _isSyncing
+        _isSyncing,
+        taskQueueManager.allTasks
     ) { array ->
         @Suppress("UNCHECKED_CAST")
+        val allTasks = array[8] as List<TaskItem>
+        // Filter to show only active tasks (running or queued)
+        val activeTasks = allTasks.filter { 
+            it.status == TaskStatus.RUNNING || it.status == TaskStatus.QUEUED 
+        }
         DashboardState(
             files = array[0] as List<CloudFile>,
             isUploading = array[1] as Boolean,
@@ -170,7 +188,8 @@ class MainViewModel(
             downloadProgress = array[4] as Float,
             currentFileName = array[5] as String?,
             isConfigLoaded = array[6] as Boolean,
-            isSyncing = array[7] as Boolean
+            isSyncing = array[7] as Boolean,
+            activeTasks = activeTasks
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, DashboardState())
     

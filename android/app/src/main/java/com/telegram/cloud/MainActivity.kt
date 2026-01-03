@@ -1385,6 +1385,12 @@ class MainActivity : ComponentActivity() {
                                     filesToShareBatch = files
                                     sharePassword = ""
                                     showShareDialog = true
+                                },
+                                onCancelTask = { taskId ->
+                                    scope.launch {
+                                        container.taskQueueManager.cancelTask(taskId)
+                                        snackbarHostState.showSnackbar(context.getString(R.string.operation_cancelled))
+                                    }
                                 }
                             )
                             }

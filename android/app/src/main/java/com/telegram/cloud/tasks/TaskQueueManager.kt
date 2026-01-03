@@ -78,12 +78,23 @@ class TaskQueueManager(private val context: Context) {
     )
     val progressUpdates = _progressUpdates.asSharedFlow()
     
+    // Events emitted when a task completes (for triggering file list refresh)
+    private val _taskCompletedEvents = MutableSharedFlow<TaskItem>(
+        extraBufferCapacity = 16,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val taskCompletedEvents = _taskCompletedEvents.asSharedFlow()
+    
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     
     init {
         // Start queues
         uploadQueue.start()
         downloadQueue.start()
+        
+        // Prune orphaned tasks from previous sessions to ensure clean state
+        // This prevents "zombie" uploads/downloads that run without UI representation
+        pruneOrphanedTasks()
         
         // Combine all tasks from all queues
         scope.launch {
@@ -95,6 +106,21 @@ class TaskQueueManager(private val context: Context) {
             }.collect { tasks ->
                 _allTasks.value = tasks
             }
+        }
+    }
+    
+    /**
+     * Cancel all existing WorkManager tasks to prevent inconsistencies on app start.
+     * This acts as a "hard reset" for the background task synchronizer.
+     */
+    private fun pruneOrphanedTasks() {
+        try {
+            Log.i(TAG, "Pruning all orphaned WorkManager tasks to ensure clean start")
+            WorkManager.getInstance(context).cancelAllWork()
+            // We also prune finished work to keep the internal database clean
+            WorkManager.getInstance(context).pruneWork()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error pruning orphaned tasks", e)
         }
     }
     
@@ -226,13 +252,16 @@ class TaskQueueManager(private val context: Context) {
     suspend fun cancelTask(taskId: String) {
         val task = _allTasks.value.find { it.id == taskId } ?: return
         when (task.type) {
-            TaskType.UPLOAD -> uploadQueue.cancelTask(taskId)
+            TaskType.UPLOAD -> {
+                // Cancel the actual upload coroutine
+                com.telegram.cloud.data.remote.UploadCancellationManager.cancelUpload(taskId)
+                uploadQueue.cancelTask(taskId)
+            }
             TaskType.DOWNLOAD -> downloadQueue.cancelTask(taskId)
             TaskType.GALLERY_SYNC -> { /* Gallery sync handled separately */ }
         }
         
-        // Note: WorkManager jobs are cancelled automatically when task is removed from queue
-        // Individual work IDs would need to be tracked if we want to cancel specific jobs
+        Log.i(TAG, "Task $taskId cancelled")
     }
     
     /**
@@ -258,7 +287,11 @@ class TaskQueueManager(private val context: Context) {
     }
 
     suspend fun markUploadTaskCompleted(taskId: String) {
+        val task = uploadQueue.getTask(taskId)
         uploadQueue.completeTask(taskId)
+        // Emit completion event to trigger file list refresh
+        task?.let { _taskCompletedEvents.tryEmit(it) }
+        Log.i(TAG, "Upload task $taskId completed, emitted completion event")
     }
 
     suspend fun markUploadTaskFailed(taskId: String, error: String?) {
@@ -266,7 +299,11 @@ class TaskQueueManager(private val context: Context) {
     }
 
     suspend fun markDownloadTaskCompleted(taskId: String) {
+        val task = downloadQueue.getTask(taskId)
         downloadQueue.completeTask(taskId)
+        // Emit completion event 
+        task?.let { _taskCompletedEvents.tryEmit(it) }
+        Log.i(TAG, "Download task $taskId completed, emitted completion event")
     }
 
     suspend fun markDownloadTaskFailed(taskId: String, error: String?) {
