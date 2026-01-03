@@ -1,22 +1,13 @@
 <div style="display: flex; gap: 10px;">
 
-  <img src="https://private-user-images.githubusercontent.com/193408847/531290165-0c6a6243-7eae-4185-a1e8-37de364d4248.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NjczNzAxNjEsIm5iZiI6MTc2NzM2OTg2MSwicGF0aCI6Ii8xOTM0MDg4NDcvNTMxMjkwMTY1LTBjNmE2MjQzLTdlYWUtNDE4NS1hMWU4LTM3ZGUzNjRkNDI0OC5wbmc_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjYwMTAyJTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI2MDEwMlQxNjA0MjFaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT0xYjA4OGZiMjJjMzE2YmIzNzI4NjQyOGI4MTBjYWVkZmRlMTMxYWUwZThjNmE5ZDlhZTc4YWJmMGZkMzkxYzRlJlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCJ9.zlcgOlrA-dY7zjG7jTHsOXLu4ud-CxGnV9EMW3GlNpI" width="300">
-
- 
+  <img src="https://github.com/reimen-cpu/TG-cloud-android/blob/main/android/img/Captura%20de%20pantalla%202025-12-31%20190501.png" width="300">
+  
 </div>
+
 
 # Telegram Cloud Android
 
 Android application to manage files in the cloud using Telegram as a backend. **Your cloud, your rules 🚀.**
-
-
-
-## ⚠️ IMPORTANT:
-
-- Minimum Android version: 9.0 (API 28)
-- Target Android version: 14 (API 34)
-- Requires a Telegram bot token and private channel for operation
-- Add multiple tokens (up to 5) for better performance
 
 ## 🚀 Main Features
 
