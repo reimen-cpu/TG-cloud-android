@@ -87,7 +87,9 @@ fun WizardScreen(
                 WizardStep.WELCOME -> {
                     WelcomeStep(
                         onNext = { viewModel.nextStep() },
-                        onImportBackup = onImportBackup
+                        onImportBackup = onImportBackup,
+                        currentLanguage = state.currentLanguage,
+                        onLanguageSelected = { viewModel.setLanguage(it) }
                     )
                 }
                 

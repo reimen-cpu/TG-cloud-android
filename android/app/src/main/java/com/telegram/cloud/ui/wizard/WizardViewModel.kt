@@ -23,13 +23,22 @@ class WizardViewModel(
     private val repository: TelegramRepository
 ) : ViewModel() {
     
-    private val _state = MutableStateFlow(WizardState())
+    private val _state = MutableStateFlow(WizardState(
+        currentLanguage = com.telegram.cloud.util.LanguageManager.getCurrentLanguage()
+    ))
     val state: StateFlow<WizardState> = _state.asStateFlow()
     
     private val telegramClient = TelegramBotClient()
     
     companion object {
         private const val TAG = "WizardViewModel"
+    }
+
+    // Language
+    
+    fun setLanguage(code: String) {
+        com.telegram.cloud.util.LanguageManager.setLanguage(code)
+        _state.update { it.copy(currentLanguage = code) }
     }
     
     // Navigation

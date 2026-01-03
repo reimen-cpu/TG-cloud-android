@@ -83,6 +83,9 @@ sealed class ConnectionTestState {
 data class WizardState(
     val currentStep: WizardStep = WizardStep.WELCOME,
     
+    // Language
+    val currentLanguage: String = "en",
+    
     // Bot Token
     val primaryToken: String = "",
     val primaryTokenValidation: TokenValidationState = TokenValidationState.Idle,

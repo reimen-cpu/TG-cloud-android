@@ -29,119 +29,130 @@ import com.telegram.cloud.ui.theme.Spacing
 fun WelcomeStep(
     onNext: () -> Unit,
     onImportBackup: (() -> Unit)? = null,
+    currentLanguage: String = "en",
+    onLanguageSelected: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(Spacing.screenPaddingLarge),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Spacer(Modifier.height(32.dp))
-        
-        // App icon/logo
-        Image(
-            painter = painterResource(id = R.drawable.ic_launcher_foreground),
-            contentDescription = null,
-            modifier = Modifier.size(120.dp)
-        )
-        
-        Spacer(Modifier.height(24.dp))
-        
-        Text(
-            text = stringResource(R.string.wizard_welcome_title),
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
-        )
-        
-        Spacer(Modifier.height(8.dp))
-        
-        Text(
-            text = stringResource(R.string.wizard_welcome_subtitle),
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-        
-        Spacer(Modifier.height(32.dp))
-        
-        // Requirements
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-            )
-        ) {
-            Column(modifier = Modifier.padding(Spacing.screenPadding)) {
-                Text(
-                    text = stringResource(R.string.wizard_requirements_title),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                
-                Spacer(Modifier.height(12.dp))
-                
-                RequirementItem(
-                    icon = Icons.Default.SmartToy,
-                    text = stringResource(R.string.wizard_requirement_bot)
-                )
-                RequirementItem(
-                    icon = Icons.Default.Forum,
-                    text = stringResource(R.string.wizard_requirement_channel)
-                )
-                RequirementItem(
-                    icon = Icons.Default.Wifi,
-                    text = stringResource(R.string.wizard_requirement_internet)
-                )
-            }
-        }
-        
-        Spacer(Modifier.height(24.dp))
-        
-        // What we'll do
-        InfoCard(
-            title = stringResource(R.string.wizard_what_well_do_title),
-            description = stringResource(R.string.wizard_what_well_do_description),
-            icon = Icons.Default.Checklist
-        )
-        
-        Spacer(Modifier.weight(1f))
-        
-        // Next button (Primary Action)
-        Button(
-            onClick = onNext,
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(Spacing.screenPaddingLarge),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                text = stringResource(R.string.wizard_get_started),
-                style = MaterialTheme.typography.titleMedium
-            )
-            Spacer(Modifier.width(8.dp))
-            Icon(Icons.Default.ArrowForward, contentDescription = null)
-        }
-        
-        // Import backup button (Secondary Action)
-        if (onImportBackup != null) {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(48.dp)) // Increased spacer to avoid overlap with language selector
             
-            TextButton(
-                onClick = onImportBackup,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = stringResource(R.string.wizard_import_backup),
-                    style = MaterialTheme.typography.bodyLarge
+            // App icon/logo
+            Image(
+                painter = painterResource(id = R.drawable.ic_launcher_foreground),
+                contentDescription = null,
+                modifier = Modifier.size(120.dp)
+            )
+            
+            Spacer(Modifier.height(24.dp))
+            
+            Text(
+                text = stringResource(R.string.wizard_welcome_title),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            
+            Spacer(Modifier.height(8.dp))
+            
+            Text(
+                text = stringResource(R.string.wizard_welcome_subtitle),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            
+            Spacer(Modifier.height(32.dp))
+            
+            // Requirements
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                 )
+            ) {
+                Column(modifier = Modifier.padding(Spacing.screenPadding)) {
+                    Text(
+                        text = stringResource(R.string.wizard_requirements_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    
+                    Spacer(Modifier.height(12.dp))
+                    
+                    RequirementItem(
+                        icon = Icons.Default.SmartToy,
+                        text = stringResource(R.string.wizard_requirement_bot)
+                    )
+                    RequirementItem(
+                        icon = Icons.Default.Forum,
+                        text = stringResource(R.string.wizard_requirement_channel)
+                    )
+                    RequirementItem(
+                        icon = Icons.Default.Wifi,
+                        text = stringResource(R.string.wizard_requirement_internet)
+                    )
+                }
+            }
+            
+            Spacer(Modifier.height(24.dp))
+            
+            // What we'll do
+            InfoCard(
+                title = stringResource(R.string.wizard_what_well_do_title),
+                description = stringResource(R.string.wizard_what_well_do_description),
+                icon = Icons.Default.Checklist
+            )
+            
+            Spacer(Modifier.weight(1f))
+            
+            // Next button (Primary Action)
+            Button(
+                onClick = onNext,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.wizard_get_started),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(Modifier.width(8.dp))
+                Icon(Icons.Default.ArrowForward, contentDescription = null)
+            }
+            
+            // Import backup button (Secondary Action)
+            if (onImportBackup != null) {
+                Spacer(Modifier.height(16.dp))
+                
+                TextButton(
+                    onClick = onImportBackup,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.wizard_import_backup),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
             }
         }
         
-
+        // Language Selector (Top Right)
+        LanguageSelector(
+            currentLanguageCode = currentLanguage,
+            onLanguageSelected = onLanguageSelected,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 16.dp, end = 16.dp)
+        )
     }
 }
 

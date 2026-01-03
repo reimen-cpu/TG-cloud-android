@@ -84,7 +84,9 @@ import com.telegram.cloud.ui.LinkPasswordDialog
 import com.telegram.cloud.gallery.GalleryMediaEntity
 
 
-class MainActivity : ComponentActivity() {
+import androidx.appcompat.app.AppCompatActivity
+
+class MainActivity : AppCompatActivity() {
     private var isPaused = false
     private var shouldShowBackgroundDialog = false
     
