@@ -1506,10 +1506,20 @@ private fun MediaListItem(
                         model = ImageRequest.Builder(context)
                             .data(imageSource)
                             .crossfade(true)
+                            .apply {
+                                if (media.isVideo && thumbnailFile?.exists() != true) {
+                                    decoderFactory { result, options, _ ->
+                                        VideoFrameDecoder(result.source, options)
+                                    }
+                                    videoFrameMillis(1000)
+                                }
+                            }
                             .build(),
                         contentDescription = media.filename,
                         modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
+                        contentScale = ContentScale.Crop,
+                        error = painterResource(id = R.drawable.ic_launcher_foreground),
+                        fallback = painterResource(id = R.drawable.ic_launcher_foreground)
                     )
                 } else {
                     Icon(
