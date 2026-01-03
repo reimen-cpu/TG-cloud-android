@@ -77,6 +77,12 @@ import com.telegram.cloud.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
+import com.telegram.cloud.ui.MainDialogState
+import com.telegram.cloud.ui.RestorePasswordDialog
+import com.telegram.cloud.ui.CreateBackupPasswordDialog
+import com.telegram.cloud.ui.LinkPasswordDialog
+import com.telegram.cloud.gallery.GalleryMediaEntity
+
 
 class MainActivity : ComponentActivity() {
     private var isPaused = false
@@ -97,7 +103,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val container = (application as TelegramCloudApp).container
-        val factory = MainViewModelFactory(this, container.repository, container.backupManager, container.taskQueueManager)
+        
+        val factory = MainViewModelFactory(
+            applicationContext,
+            container.repository,
+            container.backupManager,
+            container.taskQueueManager,
+            container.localFileRepository
+        )
         val galleryFactory = GalleryViewModelFactory(
             this,
             container.mediaScanner,
@@ -148,27 +161,14 @@ class MainActivity : ComponentActivity() {
                 }
             }
             var editingConfig by rememberSaveable { mutableStateOf(false) }
-            var pendingRestoreFile: File? by remember { mutableStateOf(null) }
-            var showPasswordDialog by remember { mutableStateOf(false) }
-            var restorePassword by rememberSaveable { mutableStateOf("") }
             
-            // Share link dialog state
-            var showShareDialog by remember { mutableStateOf(false) }
-            var sharePassword by rememberSaveable { mutableStateOf("") }
-            var fileToShare: CloudFile? by remember { mutableStateOf(null) }
-            var filesToShareBatch: List<CloudFile>? by remember { mutableStateOf(null) }
-            var mediaToShare: GalleryMediaEntity? by remember { mutableStateOf(null) }
-            var mediaListToShare: List<GalleryMediaEntity>? by remember { mutableStateOf(null) }
-            var showBackupPasswordDialog by remember { mutableStateOf(false) }
-            var backupPassword by rememberSaveable { mutableStateOf("") }
-            var pendingBackupFile: File? by remember { mutableStateOf(null) }
+            // Files removed from here (pendingRestoreFile, showPasswordDialog, etc.) as they are now in ViewModel state
+
             
             val linksDir = remember {
                 File(context.getExternalFilesDir(null), "links").apply { mkdirs() }
             }
-            val downloadsDir = remember {
-                getUserVisibleDownloadsDir(context)
-            }
+
             val downloadTempDir = remember {
                 File(context.cacheDir, "downloads").apply { mkdirs() }
             }
@@ -189,53 +189,26 @@ class MainActivity : ComponentActivity() {
                 batchDownloadCurrent = 0
             }
 
-            // Single file picker (for backward compatibility)
-            val pickFileLauncher = rememberLauncherForActivityResult(
-                ActivityResultContracts.OpenDocument()
-            ) { uri: Uri? ->
-                if (uri != null) {
-                    contentResolver.takePersistableUriPermission(
-                        uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
-                    val meta = queryDocumentMeta(uri)
-                    viewModel.upload(
-                        UploadRequest(
-                            uri = uri.toString(),
-                            displayName = meta.name,
-                            caption = null,
-                            sizeBytes = meta.size
-                        )
-                    )
-                }
-            }
+
             
             // Multiple files picker
             val pickMultipleFilesLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.OpenMultipleDocuments()
             ) { uris: List<Uri> ->
                 if (uris.isNotEmpty()) {
-                    val requests = uris.mapNotNull { uri ->
+                    // Take permissions immediately
+                    uris.forEach { uri ->
                         try {
                             contentResolver.takePersistableUriPermission(
                                 uri,
                                 Intent.FLAG_GRANT_READ_URI_PERMISSION
                             )
-                            val meta = queryDocumentMeta(uri)
-                            UploadRequest(
-                                uri = uri.toString(),
-                                displayName = meta.name,
-                                caption = null,
-                                sizeBytes = meta.size
-                            )
                         } catch (e: Exception) {
-                            Log.e("MainActivity", "Error processing file $uri", e)
-                            null
+                            Log.e("MainActivity", "Error taking permission for $uri", e)
                         }
                     }
-                    if (requests.isNotEmpty()) {
-                        viewModel.uploadMultiple(requests)
-                    }
+                    // Hand off to ViewModel for processing (meta query + queueing)
+                    viewModel.handleUploads(uris)
                 }
             }
 
@@ -243,33 +216,16 @@ class MainActivity : ComponentActivity() {
                 ActivityResultContracts.OpenDocument()
             ) { uri ->
                 if (uri != null) {
-                    val restoreFile = copyToCache(uri, File(context.cacheDir, "restore-${System.currentTimeMillis()}.zip"))
-                    scope.launch {
-                        val needsPassword = viewModel.requiresPassword(restoreFile)
-                        if (needsPassword) {
-                            pendingRestoreFile = restoreFile
-                            restorePassword = ""
-                            showPasswordDialog = true
-                        } else {
-                            viewModel.restoreBackup(restoreFile, null)
-                        }
-                    }
+                    viewModel.handleRestoreBackupUri(uri)
                 }
             }
             
-            // Link file picker and download state
-            var pendingLinkFile: File? by remember { mutableStateOf(null) }
-            var showLinkPasswordDialog by remember { mutableStateOf(false) }
-            var linkPassword by rememberSaveable { mutableStateOf("") }
-            
+            // Link file picker
             val linkFileLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.OpenDocument()
             ) { uri ->
                 if (uri != null) {
-                    val linkFile = copyToCache(uri, File(context.cacheDir, "download-link-${System.currentTimeMillis()}.link"))
-                    pendingLinkFile = linkFile
-                    linkPassword = ""
-                    showLinkPasswordDialog = true
+                    viewModel.handleLinkFileUri(uri)
                 }
             }
 
@@ -288,339 +244,79 @@ class MainActivity : ComponentActivity() {
                     snackbarHost = { SnackbarHost(snackbarHostState) }
                 ) { padding ->
                     Box(modifier = Modifier.padding(padding)) {
-                        // Restore password dialog
-                        if (showPasswordDialog && pendingRestoreFile != null) {
-                            AlertDialog(
-                                onDismissRequest = {
-                                    showPasswordDialog = false
-                                    pendingRestoreFile = null
-                                    restorePassword = ""
-                                },
-                                title = { Text(stringResource(R.string.restore_protected_backup)) },
-                                text = {
-                                    OutlinedTextField(
-                                        value = restorePassword,
-                                        onValueChange = { restorePassword = it },
-                                        label = { Text(stringResource(R.string.password)) }
-                                    )
-                                },
-                                confirmButton = {
-                                    TextButton(
-                                        enabled = restorePassword.isNotBlank(),
-                                        onClick = {
-                                            pendingRestoreFile?.let { file ->
-                                                viewModel.restoreBackup(file, restorePassword)
-                                            }
-                                            showPasswordDialog = false
-                                            restorePassword = ""
-                                            pendingRestoreFile = null
-                                        }
-                                    ) {
-                                        Text(stringResource(R.string.restore))
-                                    }
-                                },
-                                dismissButton = {
-                                    TextButton(onClick = {
-                                        showPasswordDialog = false
-                                        restorePassword = ""
-                                        pendingRestoreFile = null
-                                    }) {
-                                        Text(stringResource(R.string.cancel))
-                                    }
-                                }
-                            )
-                        }
+                        val dialogState by viewModel.dialogState.collectAsState()
                         
-                        // Download from link password dialog
-                        if (showLinkPasswordDialog && pendingLinkFile != null) {
-                            AlertDialog(
-                                onDismissRequest = {
-                                    showLinkPasswordDialog = false
-                                    pendingLinkFile = null
-                                    linkPassword = ""
-                                },
-                                title = { Text(stringResource(R.string.download_from_link)) },
-                                text = {
-                                    Column {
-                                        Text(stringResource(R.string.enter_link_password))
-                                        Spacer(Modifier.height(8.dp))
-                                        OutlinedTextField(
-                                            value = linkPassword,
-                                            onValueChange = { linkPassword = it },
-                                            label = { Text(stringResource(R.string.password)) },
-                                            singleLine = true
-                                        )
-                                    }
-                                },
-                                confirmButton = {
-                                    TextButton(
-                                        enabled = linkPassword.isNotBlank(),
-                                        onClick = {
-                                            pendingLinkFile?.let { linkFile ->
-                                                // Capture values BEFORE resetting state to avoid race condition
-                                                val passwordToUse = linkPassword
-                                                val fileToDownload = linkFile
+                        when (val state = dialogState) {
+                            is MainDialogState.RestorePassword -> {
+                                RestorePasswordDialog(
+                                    onConfirm = { password ->
+                                        viewModel.restoreBackup(state.file, password)
+                                        viewModel.dismissDialog()
+                                    },
+                                    onDismiss = { viewModel.dismissDialog() }
+                                )
+                            }
+                            is MainDialogState.CreateBackupPassword -> {
+                                CreateBackupPasswordDialog(
+                                    onConfirm = { password ->
+                                        viewModel.createBackup(state.targetFile, password)
+                                        viewModel.dismissDialog()
+                                    },
+                                    onDismiss = { viewModel.dismissDialog() }
+                                )
+                            }
+                            is MainDialogState.LinkPassword -> {
+                                LinkPasswordDialog(
+                                    onConfirm = { password ->
+                                        val fileToDownload = state.file
+                                        viewModel.dismissDialog()
+                                        
+                                        scope.launch {
+                                            isBatchDownloading = true
+                                            batchDownloadTotal = 0
+                                            batchDownloadCurrent = 0
+                                            batchDownloadProgress = 0f
+                                            
+                                            Log.i("MainActivity", "Download from link: file=${fileToDownload.absolutePath}, password=${password.length} chars")
+                                            
+                                            val results = multiLinkDownloadManager.downloadFromMultiLink(
+                                                linkFile = fileToDownload,
+                                                password = password,
+                                                destDir = linkDownloadTempDir
+                                            ) { progress, _ ->
+                                                batchDownloadProgress = progress
+                                            }
+                                            
+                                            resetBatchState()
+                                            
+                                            if (results.isNotEmpty()) {
+                                                val successCount = results.count { it.success }
+                                                snackbarHostState.showSnackbar(context.getString(R.string.files_downloaded, successCount, results.size))
                                                 
-                                                // Reset state immediately
-                                                showLinkPasswordDialog = false
-                                                linkPassword = ""
-                                                pendingLinkFile = null
-                                                
-                                                scope.launch {
-                                                    isBatchDownloading = true
-                                                    batchDownloadTotal = 0 // Unknown initially or could be read from link metadata
-                                                    batchDownloadCurrent = 0
-                                                    batchDownloadProgress = 0f
-                                                    
-                                                    Log.i("MainActivity", "Download from link: file=${fileToDownload.absolutePath}, password.length=${passwordToUse.length}")
-                                                    
-                                                    val results = multiLinkDownloadManager.downloadFromMultiLink(
-                                                        linkFile = fileToDownload,
-                                                        password = passwordToUse,
-                                                        destDir = linkDownloadTempDir
-                                                    ) { progress, phase ->
-                                                        Log.i("MainActivity", "LinkDownload progress callback: progress=$progress, phase=$phase")
-                                                        // Update state directly - we're already in a coroutine on Dispatchers.IO
-                                                        // but Compose state updates are thread-safe
-                                                        batchDownloadProgress = progress
-                                                        Log.i("MainActivity", "Updated batchDownloadProgress to $batchDownloadProgress")
-                                                    }
-                                                    
-                                                    resetBatchState()
-                                                    
-                                                    if (results.isNotEmpty()) {
-                                                        val successCount = results.count { it.success }
-                                                        snackbarHostState.showSnackbar(context.getString(R.string.files_downloaded, successCount, results.size))
+                                                results.forEach { result ->
+                                                    result.filePath?.let { rawPath ->
+                                                        val file = File(rawPath)
+                                                        val extension = file.extension.lowercase()
+                                                        val resolvedMime = extension.takeIf { it.isNotBlank() }
+                                                            ?: "application/octet-stream"
                                                         
-                                                        // Move files to public downloads
-                                                        results.forEach { result ->
-                                                            result.filePath?.let { rawPath ->
-                                                                val file = File(rawPath)
-                                                                // Use file.extension instead of getFileExtensionFromUrl for better handling
-                                                                val extension = file.extension.lowercase()
-                                                                val resolvedMime = extension.takeIf { it.isNotBlank() }
-                                                                    ?.let { android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) }
-                                                                    ?: "application/octet-stream"
-                                                                
-                                                                Log.i("MainActivity", "Moving file: ${file.name}, ext=$extension, mime=$resolvedMime")
-                                                                    
-                                                                moveFileToDownloads(
-                                                                    context = context,
-                                                                    source = file,
-                                                                    displayName = file.name,
-                                                                    mimeType = resolvedMime,
-                                                                    subfolder = "telegram cloud app/Downloads"
-                                                                )
-                                                            }
-                                                        }
-                                                    } else {
-                                                        snackbarHostState.showSnackbar(context.getString(R.string.wrong_password_or_corrupt_file))
+                                                         shareFile(this@MainActivity, file, resolvedMime)
                                                     }
                                                 }
                                             }
                                         }
-                                    ) {
-                                        Text(stringResource(R.string.download))
-                                    }
-                                },
-                                dismissButton = {
-                                    TextButton(onClick = {
-                                        showLinkPasswordDialog = false
-                                        linkPassword = ""
-                                        pendingLinkFile = null
-                                    }) {
-                                        Text(stringResource(R.string.cancel))
-                                    }
-                                }
-                            )
+                                    },
+                                    onDismiss = { viewModel.dismissDialog() }
+                                )
+                            }
+                            else -> {} // Handle other dialog states or no dialog
                         }
-                        
-                        // Backup password dialog
-                        if (showBackupPasswordDialog && pendingBackupFile != null) {
-                            AlertDialog(
-                                onDismissRequest = {
-                                    showBackupPasswordDialog = false
-                                    pendingBackupFile = null
-                                    backupPassword = ""
-                                },
-                                title = { Text(stringResource(R.string.create_backup)) },
-                                text = {
-                                    Column {
-                                        Text(stringResource(R.string.define_backup_password))
-                                        Spacer(Modifier.height(8.dp))
-                                        OutlinedTextField(
-                                            value = backupPassword,
-                                            onValueChange = { backupPassword = it },
-                                            label = { Text(stringResource(R.string.password)) },
-                                            singleLine = true
-                                        )
-                                    }
-                                },
-                                confirmButton = {
-                                    TextButton(
-                                        enabled = backupPassword.isNotBlank(),
-                                        onClick = {
-                                            pendingBackupFile?.let { file ->
-                                                viewModel.createBackup(file, backupPassword)
-                                            }
-                                            showBackupPasswordDialog = false
-                                            pendingBackupFile = null
-                                            backupPassword = ""
-                                        }
-                                    ) {
-                                        Text(stringResource(R.string.create_backup))
-                                    }
-                                },
-                                dismissButton = {
-                                    TextButton(onClick = {
-                                        showBackupPasswordDialog = false
-                                        backupPassword = ""
-                                        pendingBackupFile = null
-                                    }) {
-                                        Text(stringResource(R.string.cancel))
-                                    }
-                                }
-                            )
-                        }
-                        
-                        // Share link password dialog
-                        if (showShareDialog && fileToShare != null) {
-                            AlertDialog(
-                                onDismissRequest = {
-                                    showShareDialog = false
-                                    fileToShare = null
-                                    sharePassword = ""
-                                },
-                                title = { Text(stringResource(R.string.create_link_file)) },
-                                text = {
-                                    Column {
-                                        Text(stringResource(R.string.define_link_password))
-                                        Spacer(Modifier.height(8.dp))
-                                        OutlinedTextField(
-                                            value = sharePassword,
-                                            onValueChange = { sharePassword = it },
-                                            label = { Text(stringResource(R.string.password)) },
-                                            singleLine = true
-                                        )
-                                    }
-                                },
-                                confirmButton = {
-                                    val shareLabel = stringResource(R.string.share)
-                                    TextButton(
-                                        enabled = sharePassword.isNotBlank(),
-                                        onClick = {
-                                            fileToShare?.let { file ->
-                                                val shortSize = formatShortSize(file.sizeBytes)
-                                                val linkFile = File(linksDir, "${sanitizeFileName(file.fileName)}-${shortSize}.link")
-                                                viewModel.generateLinkFile(file, sharePassword, linkFile) { success ->
-                                                    if (success) {
-                                                        // Share the .link file
-                                                        val uri = FileProvider.getUriForFile(
-                                                            context,
-                                                            "${context.packageName}.provider",
-                                                            linkFile
-                                                        )
-                                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                                            type = "application/octet-stream"
-                                                            putExtra(Intent.EXTRA_STREAM, uri)
-                                                            putExtra(Intent.EXTRA_SUBJECT, "Telegram Cloud: ${file.fileName}.link")
-                                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                        }
-                                                        startActivity(Intent.createChooser(shareIntent, shareLabel))
-                                                    }
-                                                }
-                                            }
-                                            showShareDialog = false
-                                            fileToShare = null
-                                            sharePassword = ""
-                                        }
-                                    ) {
-                                        Text(stringResource(R.string.create_and_share))
-                                    }
-                                },
-                                dismissButton = {
-                                    TextButton(onClick = {
-                                        showShareDialog = false
-                                        fileToShare = null
-                                        sharePassword = ""
-                                    }) {
-                                        Text(stringResource(R.string.cancel))
-                                    }
-                                }
-                            )
-                        }
-                        
-                        // Share dialog for gallery media (single file)
-                        if (showShareDialog && mediaToShare != null) {
-                            AlertDialog(
-                                onDismissRequest = {
-                                    showShareDialog = false
-                                    mediaToShare = null
-                                    sharePassword = ""
-                                },
-                                title = { Text(stringResource(R.string.create_link_file)) },
-                                text = {
-                                    Column {
-                                        Text(stringResource(R.string.define_link_password))
-                                        Spacer(Modifier.height(8.dp))
-                                        OutlinedTextField(
-                                            value = sharePassword,
-                                            onValueChange = { sharePassword = it },
-                                            label = { Text(stringResource(R.string.password)) },
-                                            singleLine = true
-                                        )
-                                    }
-                                },
-                                confirmButton = {
-                                    val shareLabel = stringResource(R.string.share)
-                                    TextButton(
-                                        enabled = sharePassword.isNotBlank(),
-                                        onClick = {
-                                            mediaToShare?.let { media ->
-                                                val shortSize = formatShortSize(media.sizeBytes)
-                                                val linkFile = File(linksDir, "${sanitizeFileName(media.filename)}-${shortSize}.link")
-                                                viewModel.generateLinkFileFromGallery(media, sharePassword, linkFile) { success ->
-                                                    if (success) {
-                                                        // Share the .link file
-                                                        val uri = FileProvider.getUriForFile(
-                                                            context,
-                                                            "${context.packageName}.provider",
-                                                            linkFile
-                                                        )
-                                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                                            type = "application/octet-stream"
-                                                            putExtra(Intent.EXTRA_STREAM, uri)
-                                                            putExtra(Intent.EXTRA_SUBJECT, "Telegram Cloud: ${media.filename}.link")
-                                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                        }
-                                                        startActivity(Intent.createChooser(shareIntent, shareLabel))
-                                                        scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.link_file_shared_simple)) }
-                                                    } else {
-                                                        scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.error_creating_link_file)) }
-                                                    }
-                                                }
-                                            }
-                                            showShareDialog = false
-                                            mediaToShare = null
-                                            sharePassword = ""
-                                        }
-                                    ) {
-                                        Text(stringResource(R.string.create_and_share))
-                                    }
-                                },
-                                dismissButton = {
-                                    TextButton(onClick = {
-                                        showShareDialog = false
-                                        mediaToShare = null
-                                        sharePassword = ""
-                                    }) {
-                                        Text(stringResource(R.string.cancel))
-                                    }
-                                }
-                            )
-                        }
-                        
-                        // Share dialog for gallery media (multiple files)
+
+                        var showShareDialog by rememberSaveable { mutableStateOf(false) }
+                        var mediaListToShare by remember { mutableStateOf<List<GalleryMediaEntity>?>(null) }
+                        var filesToShareBatch by remember { mutableStateOf<List<CloudFile>?>(null) }
+                        var sharePassword by rememberSaveable { mutableStateOf("") }
+
                         if (showShareDialog && mediaListToShare != null) {
                             AlertDialog(
                                 onDismissRequest = {
@@ -1017,10 +713,7 @@ class MainActivity : ComponentActivity() {
                                                 MediaAction.Share -> {
                                                     // Use .link generation instead of direct file share
                                                     if (media.isSynced) {
-                                                        mediaToShare = media
-                                                        mediaListToShare = null
-                                                        sharePassword = ""
-                                                        showShareDialog = true
+                                                        viewModel.showShareGalleryMediaDialog(media)
                                                     } else {
                                                         scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.file_must_be_synced)) }
                                                     }
@@ -1273,15 +966,9 @@ class MainActivity : ComponentActivity() {
                                             // Share multiple files using .link generation
                                             if (selectedMediaList.isNotEmpty()) {
                                                 if (selectedMediaList.size == 1) {
-                                                    mediaToShare = selectedMediaList.first()
-                                                    mediaListToShare = null
-                                                    sharePassword = ""
-                                                    showShareDialog = true
+                                                    viewModel.showShareGalleryMediaDialog(selectedMediaList.first())
                                                 } else {
-                                                    mediaListToShare = selectedMediaList
-                                                    mediaToShare = null
-                                                    sharePassword = ""
-                                                    showShareDialog = true
+                                                    viewModel.showShareGalleryMediaBatchDialog(selectedMediaList)
                                                 }
                                             }
                                         },
@@ -1297,7 +984,7 @@ class MainActivity : ComponentActivity() {
                                                     val result = multiFileGalleryManager.downloadMultiple(
                                                         mediaList = selectedMediaList,
                                                         config = cfg
-                                                    ) { current, total, progress ->
+                                                    ) { current, _, progress ->
                                                         batchDownloadProgress = progress
                                                         batchDownloadCurrent = current
                                                     }
@@ -1315,7 +1002,6 @@ class MainActivity : ComponentActivity() {
                             }
                             config != null -> {
                             DashboardScreen(
-                                config = config!!,
                                 state = dashboard,
                                 onUploadClick = { pickMultipleFilesLauncher.launch(arrayOf("*/*")) },
                                 onDownloadFromLinkClick = { linkFileLauncher.launch(arrayOf("*/*")) },
@@ -1329,9 +1015,8 @@ class MainActivity : ComponentActivity() {
                                     )
                                 },
                                 onShareClick = { file ->
-                                    // Show dialog to get password and create .link file
-                                    fileToShare = file
-                                    sharePassword = ""
+                                    // Show dialog to get password and create .link file (using batch list for single items too)
+                                    filesToShareBatch = listOf(file)
                                     showShareDialog = true
                                 },
                                 onCopyLink = { file ->
@@ -1345,11 +1030,11 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onDeleteLocal = { file -> viewModel.deleteFile(file) },
                                 onCreateBackup = {
-                                    pendingBackupFile = File(
+                                    val backupFile = File(
                                         File(context.cacheDir, "backups").apply { mkdirs() },
                                         "tgcloud-backup-${System.currentTimeMillis()}.zip"
                                     )
-                                    showBackupPasswordDialog = true
+                                    viewModel.showCreateBackupPasswordDialog(backupFile)
                                 },
                                 onRestoreBackup = { restoreLauncher.launch(arrayOf("application/zip")) },
                                 onOpenConfig = { editingConfig = true },
@@ -1383,7 +1068,6 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onShareMultiple = { files ->
                                     filesToShareBatch = files
-                                    sharePassword = ""
                                     showShareDialog = true
                                 },
                                 onCancelTask = { taskId ->
@@ -1402,28 +1086,7 @@ class MainActivity : ComponentActivity() {
     }
 
 
-    private fun queryDocumentMeta(uri: Uri): DocumentMeta {
-        var name = "archivo.bin"
-        var size = 0L
-        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-            val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
-            if (cursor.moveToFirst()) {
-                if (nameIndex != -1) name = cursor.getString(nameIndex)
-                if (sizeIndex != -1) size = cursor.getLong(sizeIndex)
-            }
-        }
-        return DocumentMeta(name, size)
-    }
 
-    private fun copyToCache(uri: Uri, target: File): File {
-        contentResolver.openInputStream(uri)?.use { input ->
-            target.outputStream().use { output ->
-                input.copyTo(output)
-            }
-        }
-        return target
-    }
 
     private fun copyToClipboard(text: String) {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -1445,24 +1108,28 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun shareBackupFile(file: File) {
-        if (!file.exists()) return
-        val result = moveFileToDownloads(
-            context = this,
-            source = file,
-            displayName = file.name,
-            mimeType = "application/zip",
-            subfolder = "telegram cloud app/Backups"
-        )
-        val uriToShare = result?.uri ?: run {
-            FileProvider.getUriForFile(this, "${packageName}.provider", file)
-        }
-        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/zip"
-            putExtra(Intent.EXTRA_STREAM, uriToShare)
-            putExtra(Intent.EXTRA_SUBJECT, getString(R.string.share_backup_subject))
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        startActivity(Intent.createChooser(shareIntent, getString(R.string.share_backup)))
+        shareFile(this, file, "application/zip", getString(R.string.share_backup_subject), getString(R.string.share_backup))
+    }
+    
+    private fun shareFile(context: Context, file: File, mimeType: String = "application/octet-stream", subject: String = "", chooserTitle: String = "Share") {
+         if (!file.exists()) return
+         val result = moveFileToDownloads(
+             context = context,
+             source = file,
+             displayName = file.name,
+             mimeType = mimeType,
+             subfolder = "telegram cloud app/Shared"
+         )
+         val uriToShare = result?.uri ?: run {
+             FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
+         }
+         val shareIntent = Intent(Intent.ACTION_SEND).apply {
+             type = mimeType
+             putExtra(Intent.EXTRA_STREAM, uriToShare)
+             if (subject.isNotEmpty()) putExtra(Intent.EXTRA_SUBJECT, subject)
+             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+         }
+         context.startActivity(Intent.createChooser(shareIntent, chooserTitle))
     }
 
     private fun buildDownloadFile(dir: File, fileName: String, messageId: Long): File {
@@ -1493,5 +1160,5 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-data class DocumentMeta(val name: String, val size: Long)
+
 

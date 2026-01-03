@@ -13,6 +13,7 @@ import com.telegram.cloud.gallery.MediaScanner
 import com.telegram.cloud.tasks.TaskQueueManager
 import com.telegram.cloud.data.sync.SyncLogManager
 import com.telegram.cloud.data.sync.SyncConfig
+import com.telegram.cloud.data.repository.LocalFileRepository
 
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
@@ -111,5 +112,7 @@ class AppContainer(context: Context) {
     
     // Task queue manager
     val taskQueueManager = TaskQueueManager(appContext)
+
+    val localFileRepository = LocalFileRepository(appContext)
 }
 

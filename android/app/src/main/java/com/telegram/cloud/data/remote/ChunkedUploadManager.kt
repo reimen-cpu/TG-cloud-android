@@ -61,6 +61,7 @@ class ChunkedUploadManager(
         channelId: String,
         tokenOffset: Int = 0,
         skipChunks: Set<Int> = emptySet(),
+        cancellationKey: String? = null,
         onProgress: ((Int, Int, Float) -> Unit)? = null,
         onChunkCompleted: ((ChunkInfo) -> Unit)? = null
     ): ChunkUploadResult = withContext(Dispatchers.IO) {
@@ -121,6 +122,11 @@ class ChunkedUploadManager(
                 async {
                     for (chunkIndex in chunkChannel) {
                         // Check for cancellation before processing chunk
+                        if (cancellationKey != null && com.telegram.cloud.data.remote.UploadCancellationManager.isCancelled(cancellationKey)) {
+                             Log.i(TAG, "Upload cancelled for task $cancellationKey")
+                             throw kotlinx.coroutines.CancellationException("Upload cancelled")
+                        }
+                        // Also check internal file ID (fallback)
                         if (com.telegram.cloud.data.remote.UploadCancellationManager.isCancelled(fileId)) {
                              Log.i(TAG, "Upload cancelled for file $fileId")
                              throw kotlinx.coroutines.CancellationException("Upload cancelled")
@@ -270,6 +276,10 @@ class ChunkedUploadManager(
                     uploaderBotToken = token
                 )
                 
+
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                Log.i(TAG, "Chunk $chunkIndex upload cancelled")
+                throw e
             } catch (e: Exception) {
                 lastError = e
                 

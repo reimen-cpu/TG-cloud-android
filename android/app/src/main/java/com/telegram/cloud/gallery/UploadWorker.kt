@@ -95,7 +95,8 @@ class UploadWorker(
                 uri = uri,
                 displayName = displayName,
                 caption = null,
-                sizeBytes = sizeBytes
+                sizeBytes = sizeBytes,
+                cancellationKey = taskId
             )
             
             // Use a coroutine scope to update foreground info asynchronously

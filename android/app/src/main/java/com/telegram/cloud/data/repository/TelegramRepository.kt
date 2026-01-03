@@ -656,6 +656,7 @@ class TelegramRepository(
                 fileSize = request.sizeBytes,
                 tokens = cfg.tokens,
                 channelId = cfg.channelId,
+                cancellationKey = request.cancellationKey ?: taskId.toString(), // Use external ID if provided, else DB ID
                 onProgress = { completed, total, percent ->
                     // Convertir porcentaje (0-100) a Float (0.0-1.0)
                     val progressFloat = (percent / 100f).coerceIn(0f, 1f)

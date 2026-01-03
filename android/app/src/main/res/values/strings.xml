@@ -153,6 +153,7 @@
     <string name="wrong_password_or_corrupt_file">Wrong password or corrupt file</string>
     <string name="files_downloaded">Downloaded %1$d/%2$d files</string>
     <string name="error_with_message">Error: %1$s</string>
+    <string name="error_reading_file">Error reading file: %1$s</string>
     <string name="unknown_error">Unknown</string>
     
     <!-- MainActivity snackbar messages -->

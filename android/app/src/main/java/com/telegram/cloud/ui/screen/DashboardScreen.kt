@@ -5,38 +5,40 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.rotate
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -45,74 +47,53 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeTopAppBar
-import androidx.compose.material3.MediumTopAppBar
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import com.google.accompanist.swiperefresh.SwipeRefresh
-import com.google.accompanist.swiperefresh.rememberSwipeRefreshState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.*
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.animation.core.*
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.google.accompanist.swiperefresh.SwipeRefresh
+import com.google.accompanist.swiperefresh.rememberSwipeRefreshState
 import com.telegram.cloud.R
 import com.telegram.cloud.data.prefs.BotConfig
 import com.telegram.cloud.domain.model.CloudFile
 import com.telegram.cloud.ui.DashboardState
-import com.telegram.cloud.tasks.TaskItem
 import com.telegram.cloud.tasks.TaskType
+import com.telegram.cloud.ui.DashboardActions
 import com.telegram.cloud.ui.theme.Spacing
 import com.telegram.cloud.ui.theme.Radius
 import com.telegram.cloud.ui.theme.Elevation
 import com.telegram.cloud.ui.theme.ComponentSize
 import com.telegram.cloud.ui.components.AnimatedIconButton
-import com.telegram.cloud.ui.components.AnimatedButton
 import com.telegram.cloud.ui.utils.HapticFeedbackType
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -137,22 +118,17 @@ private object AppColors {
 enum class SortBy { NAME, SIZE, DATE, TYPE }
 enum class SortOrder { ASCENDING, DESCENDING }
 
+/**
+ * Main dashboard screen.
+ * Optimized to use [DashboardActions] interface.
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
+@Suppress("DEPRECATION")
+
 fun DashboardScreen(
-    config: BotConfig,
     state: DashboardState,
-    onUploadClick: () -> Unit,
-    onDownloadFromLinkClick: () -> Unit,
-    onDownloadClick: (CloudFile) -> Unit,
-    onShareClick: (CloudFile) -> Unit,
-    onCopyLink: (CloudFile) -> Unit,
-    onDeleteLocal: (CloudFile) -> Unit,
-    onCreateBackup: () -> Unit,
-    onRestoreBackup: () -> Unit,
-    onOpenConfig: () -> Unit,
-    onOpenGallery: () -> Unit = {},
-    onOpenTaskQueue: () -> Unit = {},
+    actions: DashboardActions, // Use the new interface
     // Gallery sync state
     isGallerySyncing: Boolean = false,
     gallerySyncProgress: Float = 0f,
@@ -160,16 +136,9 @@ fun DashboardScreen(
     // Link download state
     isLinkDownloading: Boolean = false,
     linkDownloadProgress: Float = 0f,
-    linkDownloadFileName: String? = null,
-    // Refresh callback
-    onRefresh: () -> Unit = {},
-    // Multi-file callbacks
-    onDownloadMultiple: (List<CloudFile>) -> Unit = {},
-    onShareMultiple: (List<CloudFile>) -> Unit = {},
-    onDeleteMultiple: (List<CloudFile>) -> Unit = {},
-    // Task cancel callback
-    onCancelTask: (String) -> Unit = {}
+    linkDownloadFileName: String? = null
 ) {
+    // Unused config parameter removed
     var searchQuery by remember { mutableStateOf("") }
     var sortBy by remember { mutableStateOf(SortBy.DATE) }
     var sortOrder by remember { mutableStateOf(SortOrder.DESCENDING) }
@@ -183,6 +152,7 @@ fun DashboardScreen(
     val swipeRefreshState = rememberSwipeRefreshState(state.isSyncing)
     var horizontalDragOffset by remember { mutableStateOf(0f) }
     val context = LocalContext.current
+    
     val filteredFiles by remember(state.files, searchQuery, sortBy, sortOrder) {
         derivedStateOf {
             state.files
@@ -210,7 +180,7 @@ fun DashboardScreen(
         DeleteConfirmationDialog(
             fileName = file.fileName,
             onConfirm = {
-                onDeleteLocal(file)
+                actions.onDeleteLocal(file)
                 fileToDelete = null
             },
             onDismiss = { fileToDelete = null }
@@ -223,15 +193,15 @@ fun DashboardScreen(
             file = file,
             onDismiss = { fileForOptions = null },
             onDownload = {
-                onDownloadClick(file)
+                actions.onDownloadClick(file)
                 fileForOptions = null
             },
             onShare = {
-                onShareClick(file)
+                actions.onShareClick(file)
                 fileForOptions = null
             },
             onCopyLink = {
-                onCopyLink(file)
+                actions.onCopyLink(file)
                 fileForOptions = null
             },
             onDelete = {
@@ -241,8 +211,6 @@ fun DashboardScreen(
         )
     }
     
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
@@ -254,7 +222,7 @@ fun DashboardScreen(
                     onDragEnd = {
                         // Si el desplazamiento absoluto es mayor a 100dp (deslizar de derecha a izquierda)
                         if (horizontalDragOffset < -thresholdPx) {
-                            onOpenGallery()
+                            actions.onOpenGallery()
                         }
                         horizontalDragOffset = 0f
                     },
@@ -303,30 +271,35 @@ fun DashboardScreen(
                         )
                     }
                     
-                    // Sync indicator - rotating arc
+                    // Sync indicator - Optimized with infiniteTransition
                     val primaryColor = MaterialTheme.colorScheme.primary
                     
                     if (state.isSyncing) {
-                        var currentRotation by remember { mutableFloatStateOf(0f) }
-                        var pulseAlpha by remember { mutableFloatStateOf(0.3f) }
-                        var pulseDirection by remember { mutableStateOf(true) }
+                        // Manual low-level animation loop using frame clock
+                        // This avoids any potential issues with Animatable or InfiniteTransition on specific devices
+                        val currentRotation = remember { androidx.compose.runtime.mutableStateOf(0f) }
+                        val currentPulseAlpha = remember { androidx.compose.runtime.mutableStateOf(0.3f) }
                         
-                        LaunchedEffect(Unit) {
+                        androidx.compose.runtime.LaunchedEffect(Unit) {
+                            val startTime = androidx.compose.runtime.withFrameNanos { it }
                             while (true) {
-                                delay(16L) // ~60fps
-                                currentRotation += 4f // Sin % 360f para evitar el salto
-                                
-                                // Pulse effect
-                                if (pulseDirection) {
-                                    pulseAlpha += 0.015f
-                                    if (pulseAlpha >= 0.6f) pulseDirection = false
-                                } else {
-                                    pulseAlpha -= 0.015f
-                                    if (pulseAlpha <= 0.2f) pulseDirection = true
+                                androidx.compose.runtime.withFrameNanos { time ->
+                                    val elapsed = (time - startTime) / 1_000_000L // convert to ms
+                                    
+                                    // Rotation: Unbounded for smooth multi-speed arcs
+                                    currentRotation.value = (elapsed / 2000f) * 360f
+                                    
+                                    // Pulse: 0.3->0.6->0.3 every 2000ms
+                                    val pulseProgress = (elapsed % 2000) / 2000f
+                                    currentPulseAlpha.value = if (pulseProgress < 0.5f) {
+                                        0.3f + (pulseProgress * 2 * 0.3f) // 0.3 to 0.6
+                                    } else {
+                                        0.6f - ((pulseProgress - 0.5f) * 2 * 0.3f) // 0.6 to 0.3
+                                    }
                                 }
                             }
                         }
-                        
+
                         Box(
                             modifier = Modifier.size(48.dp),
                             contentAlignment = Alignment.Center
@@ -334,8 +307,8 @@ fun DashboardScreen(
                             Canvas(modifier = Modifier.size(36.dp)) {
                                 // Background glow ring (pulsing)
                                 drawArc(
-                                    color = primaryColor.copy(alpha = pulseAlpha * 0.5f),
-                                    startAngle = 0f,
+                                    color = primaryColor.copy(alpha = currentPulseAlpha.value * 0.5f),
+                                    startAngle = currentRotation.value, // Main rotation for backing too
                                     sweepAngle = 360f,
                                     useCenter = false,
                                     style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
@@ -344,7 +317,7 @@ fun DashboardScreen(
                                 // Secondary arc (slower, offset)
                                 drawArc(
                                     color = primaryColor.copy(alpha = 0.3f),
-                                    startAngle = currentRotation * 0.7f + 180f,
+                                    startAngle = currentRotation.value * 0.7f + 180f,
                                     sweepAngle = 120f,
                                     useCenter = false,
                                     style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
@@ -353,16 +326,16 @@ fun DashboardScreen(
                                 // Main arc (primary)
                                 drawArc(
                                     color = primaryColor,
-                                    startAngle = currentRotation,
+                                    startAngle = currentRotation.value,
                                     sweepAngle = 90f,
                                     useCenter = false,
                                     style = Stroke(width = 3.5.dp.toPx(), cap = StrokeCap.Round)
                                 )
                                 
-                                // Highlight arc (faster, shorter)
+                                // Highlight arc (faster, counter-rotating)
                                 drawArc(
                                     color = primaryColor.copy(alpha = 0.7f),
-                                    startAngle = -currentRotation * 1.3f,
+                                    startAngle = -currentRotation.value * 1.3f,
                                     sweepAngle = 45f,
                                     useCenter = false,
                                     style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
@@ -395,7 +368,7 @@ fun DashboardScreen(
                                 },
                                 onClick = {
                                     showMainMenu = false
-                                    onCreateBackup()
+                                    actions.onCreateBackup()
                                 }
                             )
                             DropdownMenuItem(
@@ -408,7 +381,7 @@ fun DashboardScreen(
                                 },
                                 onClick = {
                                     showMainMenu = false
-                                    onRestoreBackup()
+                                    actions.onRestoreBackup()
                                 }
                             )
                             DropdownMenuItem(
@@ -421,7 +394,7 @@ fun DashboardScreen(
                                 },
                                 onClick = {
                                     showMainMenu = false
-                                    onOpenGallery()
+                                    actions.onOpenGallery()
                                 }
                             )
                             DropdownMenuItem(
@@ -434,7 +407,7 @@ fun DashboardScreen(
                                 },
                                 onClick = {
                                     showMainMenu = false
-                                    onOpenTaskQueue()
+                                    actions.onOpenTaskQueue()
                                 }
                             )
                             DropdownMenuItem(
@@ -447,7 +420,7 @@ fun DashboardScreen(
                                 },
                                 onClick = {
                                     showMainMenu = false
-                                    onOpenConfig()
+                                    actions.onOpenConfig()
                                 }
                             )
                         }
@@ -462,21 +435,21 @@ fun DashboardScreen(
                     onDownload = {
                         val filesToDownload = filteredFiles.filter { selectedFiles.contains(it.id) }
                         if (filesToDownload.isNotEmpty()) {
-                            onDownloadMultiple(filesToDownload)
+                            actions.onDownloadMultiple(filesToDownload)
                         }
                         selectedFiles = emptySet()
                     },
                     onShare = {
                         val filesToShare = filteredFiles.filter { selectedFiles.contains(it.id) }
                         if (filesToShare.isNotEmpty()) {
-                            onShareMultiple(filesToShare)
+                            actions.onShareMultiple(filesToShare)
                         }
                         selectedFiles = emptySet()
                     },
                     onDelete = {
                         val filesToDelete = filteredFiles.filter { selectedFiles.contains(it.id) }
                         if (filesToDelete.isNotEmpty()) {
-                            onDeleteMultiple(filesToDelete)
+                            actions.onDeleteMultiple(filesToDelete)
                         }
                         selectedFiles = emptySet()
                     },
@@ -492,7 +465,7 @@ fun DashboardScreen(
             onRefresh = {
                 isRefreshing = true
                 scope.launch {
-                    onRefresh()
+                    actions.onRefresh()
                     delay(500)
                     isRefreshing = false
                 }
@@ -517,268 +490,327 @@ fun DashboardScreen(
                     top = Spacing.lg,
                     bottom = Spacing.screenPadding
                 )
-                ) {
+            ) {
 
-
-
-            item {
-                StatsCard(
-                    totalSize = totalSize,
-                    fileCount = fileCount,
-                    onGalleryClick = onOpenGallery
-                )
-            }
-
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.md)
-                ) {
-                    ActionButton(
-                        onClick = onUploadClick,
-                        icon = Icons.Default.CloudUpload,
-                        label = stringResource(R.string.upload),
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    ActionButton(
-                        onClick = onDownloadFromLinkClick,
-                        icon = Icons.Default.CloudDownload,
-                        label = stringResource(R.string.download),
-                        modifier = Modifier.weight(1f),
-                        iconTint = AppColors.download
+                item {
+                    StatsCard(
+                        totalSize = totalSize,
+                        fileCount = fileCount,
+                        onGalleryClick = actions::onOpenGallery
                     )
                 }
-            }
 
-            item {
-                val sortNameLabel = stringResource(R.string.sort_name)
-                val sortSizeLabel = stringResource(R.string.sort_size)
-                val sortDateLabel = stringResource(R.string.sort_date)
-                val sortTypeLabel = stringResource(R.string.sort_type)
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                    ) {
+                        ActionButton(
+                            onClick = actions::onUploadClick,
+                            icon = Icons.Default.CloudUpload,
+                            label = stringResource(R.string.upload),
+                            modifier = Modifier.weight(1f)
+                        )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Search bar - takes available space
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        placeholder = {
-                            Text(
-                                stringResource(R.string.search_files),
-                                style = MaterialTheme.typography.bodySmall
+                        ActionButton(
+                            onClick = actions::onDownloadFromLinkClick,
+                            icon = Icons.Default.CloudDownload,
+                            label = stringResource(R.string.download),
+                            modifier = Modifier.weight(1f),
+                            iconTint = AppColors.download
+                        )
+                    }
+                }
+
+                item {
+                    val sortNameLabel = stringResource(R.string.sort_name)
+                    val sortSizeLabel = stringResource(R.string.sort_size)
+                    val sortDateLabel = stringResource(R.string.sort_date)
+                    val sortTypeLabel = stringResource(R.string.sort_type)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Search bar - takes available space
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = {
+                                Text(
+                                    stringResource(R.string.search_files),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.Search,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = { searchQuery = "" },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp),
+                            textStyle = MaterialTheme.typography.bodySmall,
+                            shape = RoundedCornerShape(Radius.md),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = Color.Transparent
                             )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.Search,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
-                        trailingIcon = {
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(
-                                    onClick = { searchQuery = "" },
-                                    modifier = Modifier.size(24.dp)
+                        )
+                        
+                        // Sort selector
+                        Box {
+                            Card(
+                                modifier = Modifier
+                                    .height(48.dp)
+                                    .clickable(onClick = { showSortMenu = true }),
+                                shape = RoundedCornerShape(Radius.md),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                                elevation = CardDefaults.cardElevation(defaultElevation = Elevation.level1)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .padding(horizontal = Spacing.md)
+                                        .fillMaxHeight(),
+                                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
-                                        Icons.Default.Close,
+                                        imageVector = Icons.Default.Sort,
                                         contentDescription = null,
                                         modifier = Modifier.size(16.dp),
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                    Text(
+                                        when (sortBy) {
+                                            SortBy.NAME -> sortNameLabel
+                                            SortBy.SIZE -> sortSizeLabel
+                                            SortBy.DATE -> sortDateLabel
+                                            SortBy.TYPE -> sortTypeLabel
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Icon(
+                                        if (sortOrder == SortOrder.ASCENDING)
+                                            Icons.Default.ArrowUpward
+                                        else
+                                            Icons.Default.ArrowDownward,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
-                        },
-                        singleLine = true,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp),
-                        textStyle = MaterialTheme.typography.bodySmall,
-                        shape = RoundedCornerShape(Radius.md),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = Color.Transparent
-                        )
-                    )
-                    
-                    // Sort selector
-                    Box {
-                        Card(
-                            modifier = Modifier
-                                .height(48.dp)
-                                .clickable(onClick = { showSortMenu = true }),
-                            shape = RoundedCornerShape(Radius.md),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                            elevation = CardDefaults.cardElevation(defaultElevation = Elevation.level1)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .padding(horizontal = Spacing.md)
-                                    .fillMaxHeight(),
-                                horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Default.Sort,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    when (sortBy) {
-                                        SortBy.NAME -> sortNameLabel
-                                        SortBy.SIZE -> sortSizeLabel
-                                        SortBy.DATE -> sortDateLabel
-                                        SortBy.TYPE -> sortTypeLabel
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Icon(
-                                    if (sortOrder == SortOrder.ASCENDING)
-                                        Icons.Default.ArrowUpward
-                                    else
-                                        Icons.Default.ArrowDownward,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
 
-                        DropdownMenu(
-                            expanded = showSortMenu,
-                            onDismissRequest = { showSortMenu = false }
-                        ) {
-                            SortBy.entries.forEach { option ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            when (option) {
-                                                SortBy.NAME -> sortNameLabel
-                                                SortBy.SIZE -> sortSizeLabel
-                                                SortBy.DATE -> sortDateLabel
-                                                SortBy.TYPE -> sortTypeLabel
-                                            },
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
-                                    },
-                                    onClick = {
-                                        if (sortBy == option) {
-                                            sortOrder = if (sortOrder == SortOrder.ASCENDING)
-                                                SortOrder.DESCENDING else SortOrder.ASCENDING
-                                        } else {
-                                            sortBy = option
-                                        }
-                                        showSortMenu = false
-                                    },
-                                    leadingIcon = {
-                                        if (sortBy == option) {
-                                            Icon(
-                                                if (sortOrder == SortOrder.ASCENDING)
-                                                    Icons.Default.ArrowUpward
-                                                else
-                                                    Icons.Default.ArrowDownward,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(16.dp)
+                            DropdownMenu(
+                                expanded = showSortMenu,
+                                onDismissRequest = { showSortMenu = false }
+                            ) {
+                                SortBy.entries.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                when (option) {
+                                                    SortBy.NAME -> sortNameLabel
+                                                    SortBy.SIZE -> sortSizeLabel
+                                                    SortBy.DATE -> sortDateLabel
+                                                    SortBy.TYPE -> sortTypeLabel
+                                                },
+                                                style = MaterialTheme.typography.bodySmall
                                             )
+                                        },
+                                        onClick = {
+                                            if (sortBy == option) {
+                                                sortOrder = if (sortOrder == SortOrder.ASCENDING)
+                                                    SortOrder.DESCENDING else SortOrder.ASCENDING
+                                            } else {
+                                                sortBy = option
+                                            }
+                                            showSortMenu = false
+                                        },
+                                        leadingIcon = {
+                                            if (sortBy == option) {
+                                                Icon(
+                                                    if (sortOrder == SortOrder.ASCENDING)
+                                                        Icons.Default.ArrowUpward
+                                                    else
+                                                        Icons.Default.ArrowDownward,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
                                         }
-                                    }
-                                )
+                                    )
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            // Individual progress cards for each active task
-            // This replaces the single upload/download cards with per-file progress
-            items(
-                items = state.activeTasks,
-                key = { it.id }
-            ) { task ->
-                AnimatedVisibility(
-                    visible = true,
-                    enter = slideInVertically() + fadeIn(),
-                    exit = slideOutVertically() + fadeOut()
-                ) {
-                    ProgressCard(
-                        isUpload = task.type == TaskType.UPLOAD,
-                        fileName = task.fileName,
-                        progress = task.progress,
-                        onCancel = { onCancelTask(task.id) }
-                    )
+                // Individual progress cards ...
+                items(
+                    items = state.activeTasks,
+                    key = { it.id }
+                ) { task ->
+                    AnimatedVisibility(
+                        visible = true,
+                        enter = slideInVertically() + fadeIn(),
+                        exit = slideOutVertically() + fadeOut()
+                    ) {
+                        ProgressCard(
+                            isUpload = task.type == TaskType.UPLOAD,
+                            fileName = task.fileName,
+                            progress = task.progress,
+                            onCancel = { actions.onCancelTask(task.id) }
+                        )
+                    }
                 }
-            }
 
-            item {
-                AnimatedVisibility(
-                    visible = isGallerySyncing,
-                    enter = slideInVertically() + fadeIn(),
-                    exit = slideOutVertically() + fadeOut()
-                ) {
-                    GallerySyncProgressCard(
-                        fileName = gallerySyncFileName ?: stringResource(R.string.syncing_gallery),
-                        progress = gallerySyncProgress
-                    )
-                }
-            }
-            
-            item {
-                AnimatedVisibility(
-                    visible = isLinkDownloading,
-                    enter = slideInVertically() + fadeIn(),
-                    exit = slideOutVertically() + fadeOut()
-                ) {
-                    ProgressCard(
-                        isUpload = false,
-                        fileName = linkDownloadFileName ?: stringResource(R.string.downloading_link),
-                        progress = linkDownloadProgress
-                    )
-                }
-            }
-
-            if (filteredFiles.isEmpty()) {
                 item {
-                    EmptyState(
-                        hasSearch = searchQuery.isNotEmpty(),
-                        onClearSearch = { searchQuery = "" }
-                    )
+                    AnimatedVisibility(
+                        visible = isGallerySyncing,
+                        enter = slideInVertically() + fadeIn(),
+                        exit = slideOutVertically() + fadeOut()
+                    ) {
+                        GallerySyncProgressCard(
+                            fileName = gallerySyncFileName ?: stringResource(R.string.syncing_gallery),
+                            progress = gallerySyncProgress
+                        )
+                    }
                 }
-            } else {
-                itemsIndexed(
-                    items = filteredFiles,
-                    key = { _, file -> file.id }
-                ) { _, file ->
-                    FileCard(
-                        file = file,
-                        isSelected = selectedFiles.contains(file.id),
-                        onSelect = {
-                            selectedFiles = if (selectedFiles.contains(file.id)) {
-                                selectedFiles - file.id
-                            } else {
-                                selectedFiles + file.id
-                            }
-                        },
-                        onLongClick = { fileForOptions = file },
-                        modifier = Modifier
-                            .semantics(mergeDescendants = false) {
-                                contentDescription = "${context.getString(R.string.file_fallback)} ${file.fileName}, tamaño ${formatFileSize(file.sizeBytes)}, fecha ${formatDate(file.uploadedAt)}"
-                            }
-                    )
+                
+                item {
+                    AnimatedVisibility(
+                        visible = isLinkDownloading,
+                        enter = slideInVertically() + fadeIn(),
+                        exit = slideOutVertically() + fadeOut()
+                    ) {
+                        ProgressCard(
+                            isUpload = false,
+                            fileName = linkDownloadFileName ?: stringResource(R.string.downloading_link),
+                            progress = linkDownloadProgress
+                        )
+                    }
                 }
-            }
+
+                if (filteredFiles.isEmpty()) {
+                    item {
+                        EmptyState(
+                            hasSearch = searchQuery.isNotEmpty(),
+                            onClearSearch = { searchQuery = "" }
+                        )
+                    }
+                } else {
+                    itemsIndexed(
+                        items = filteredFiles,
+                        key = { _, file -> file.id }
+                    ) { _, file ->
+                        FileCard(
+                            file = file,
+                            isSelected = selectedFiles.contains(file.id),
+                            onSelect = {
+                                selectedFiles = if (selectedFiles.contains(file.id)) {
+                                    selectedFiles - file.id
+                                } else {
+                                    selectedFiles + file.id
+                                }
+                            },
+                            onLongClick = { fileForOptions = file },
+                            modifier = Modifier
+                                .semantics(mergeDescendants = false) {
+                                    contentDescription = "${context.getString(R.string.file_fallback)} ${file.fileName}, tamaño ${formatFileSize(file.sizeBytes)}, fecha ${formatDate(file.uploadedAt)}"
+                                }
+                        )
+                    }
+                }
             }
         }
     }
+}
+
+// LEGACY OVERLOAD FOR COMPATIBILITY
+// This allows MainActivity to compile while we migrate
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DashboardScreen(
+    state: DashboardState,
+    onUploadClick: () -> Unit,
+    onDownloadFromLinkClick: () -> Unit,
+    onDownloadClick: (CloudFile) -> Unit,
+    onShareClick: (CloudFile) -> Unit,
+    onCopyLink: (CloudFile) -> Unit,
+    onDeleteLocal: (CloudFile) -> Unit,
+    onCreateBackup: () -> Unit,
+    onRestoreBackup: () -> Unit,
+    onOpenConfig: () -> Unit,
+    onOpenGallery: () -> Unit = {},
+    onOpenTaskQueue: () -> Unit = {},
+    isGallerySyncing: Boolean = false,
+    gallerySyncProgress: Float = 0f,
+    gallerySyncFileName: String? = null,
+    isLinkDownloading: Boolean = false,
+    linkDownloadProgress: Float = 0f,
+    linkDownloadFileName: String? = null,
+    onRefresh: () -> Unit = {},
+    onDownloadMultiple: (List<CloudFile>) -> Unit = {},
+    onShareMultiple: (List<CloudFile>) -> Unit = {},
+    onDeleteMultiple: (List<CloudFile>) -> Unit = {},
+    onCancelTask: (String) -> Unit = {}
+) {
+    val actions = remember(onUploadClick) {
+        object : DashboardActions {
+            override fun onUploadClick() = onUploadClick()
+            override fun onDownloadFromLinkClick() = onDownloadFromLinkClick()
+            override fun onDownloadClick(file: CloudFile) = onDownloadClick(file)
+            override fun onShareClick(file: CloudFile) = onShareClick(file)
+            override fun onCopyLink(file: CloudFile) = onCopyLink(file)
+            override fun onDeleteLocal(file: CloudFile) = onDeleteLocal(file)
+            override fun onCreateBackup() = onCreateBackup()
+            override fun onRestoreBackup() = onRestoreBackup()
+            override fun onOpenConfig() = onOpenConfig()
+            override fun onOpenGallery() = onOpenGallery()
+            override fun onOpenTaskQueue() = onOpenTaskQueue()
+            override fun onRefresh() = onRefresh()
+            override fun onDownloadMultiple(files: List<CloudFile>) = onDownloadMultiple(files)
+            override fun onShareMultiple(files: List<CloudFile>) = onShareMultiple(files)
+            override fun onDeleteMultiple(files: List<CloudFile>) = onDeleteMultiple(files)
+            override fun onCancelTask(taskId: String) = onCancelTask(taskId)
+        }
+    }
+    
+    DashboardScreen(
+        state = state,
+        actions = actions,
+        isGallerySyncing = isGallerySyncing,
+        gallerySyncProgress = gallerySyncProgress,
+        gallerySyncFileName = gallerySyncFileName,
+        isLinkDownloading = isLinkDownloading,
+        linkDownloadProgress = linkDownloadProgress,
+        linkDownloadFileName = linkDownloadFileName
+    )
 }
 
 @Composable

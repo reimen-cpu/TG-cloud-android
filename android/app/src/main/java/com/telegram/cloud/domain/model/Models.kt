@@ -17,7 +17,8 @@ data class UploadRequest(
     val uri: String,
     val displayName: String,
     val caption: String?,
-    val sizeBytes: Long
+    val sizeBytes: Long,
+    val cancellationKey: String? = null
 )
 
 data class DownloadRequest(

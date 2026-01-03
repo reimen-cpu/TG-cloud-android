@@ -15,6 +15,7 @@ import com.telegram.cloud.data.share.ShareLinkManager
 import com.telegram.cloud.domain.model.CloudFile
 import com.telegram.cloud.domain.model.DownloadRequest
 import com.telegram.cloud.domain.model.UploadRequest
+import android.net.Uri
 import com.telegram.cloud.gallery.GalleryMediaEntity
 import com.telegram.cloud.gallery.DownloadWorker
 import com.telegram.cloud.gallery.UploadWorker
@@ -41,6 +42,19 @@ import com.telegram.cloud.data.sync.SyncLogManager
 import com.telegram.cloud.data.sync.ConflictResolver
 import com.telegram.cloud.data.remote.TelegramBotClient
 import com.telegram.cloud.tasks.TaskItem
+import kotlinx.coroutines.flow.asStateFlow
+
+sealed interface MainDialogState {
+    object None : MainDialogState
+    data class RestorePassword(val file: File) : MainDialogState
+    data class LinkPassword(val file: File) : MainDialogState
+    data class ShareFile(val file: CloudFile) : MainDialogState
+    data class ShareFilesBatch(val files: List<CloudFile>) : MainDialogState
+    data class ShareGalleryMedia(val media: GalleryMediaEntity) : MainDialogState
+    data class ShareGalleryMediaBatch(val mediaList: List<GalleryMediaEntity>) : MainDialogState
+    data class CreateBackupPassword(val targetFile: File) : MainDialogState
+}
+
 
 data class DashboardState(
     val files: List<CloudFile> = emptyList(),
@@ -63,7 +77,8 @@ class MainViewModel(
     private val context: Context,
     private val repository: TelegramRepository,
     private val backupManager: BackupManager,
-    private val taskQueueManager: TaskQueueManager
+    private val taskQueueManager: TaskQueueManager,
+    private val localFileRepository: com.telegram.cloud.data.repository.LocalFileRepository
 ) : ViewModel() {
 
     private val shareLinkManager = ShareLinkManager()
@@ -82,6 +97,73 @@ class MainViewModel(
 
     val events = _events.asSharedFlow()
     val isSyncing: StateFlow<Boolean> = _isSyncing
+    
+    private val _dialogState = MutableStateFlow<MainDialogState>(MainDialogState.None)
+    val dialogState: StateFlow<MainDialogState> = _dialogState.asStateFlow()
+
+    fun showRestorePasswordDialog(file: File) {
+        _dialogState.value = MainDialogState.RestorePassword(file)
+    }
+
+    fun showLinkPasswordDialog(file: File) {
+        _dialogState.value = MainDialogState.LinkPassword(file)
+    }
+
+    fun showShareFileDialog(file: CloudFile) {
+        _dialogState.value = MainDialogState.ShareFile(file)
+    }
+
+    fun showShareFilesBatchDialog(files: List<CloudFile>) {
+        _dialogState.value = MainDialogState.ShareFilesBatch(files)
+    }
+    
+    fun showShareGalleryMediaDialog(media: GalleryMediaEntity) {
+        _dialogState.value = MainDialogState.ShareGalleryMedia(media)
+    }
+    
+    fun showShareGalleryMediaBatchDialog(mediaList: List<GalleryMediaEntity>) {
+        _dialogState.value = MainDialogState.ShareGalleryMediaBatch(mediaList)
+    }
+
+    fun showCreateBackupPasswordDialog(file: File) {
+        _dialogState.value = MainDialogState.CreateBackupPassword(file)
+    }
+
+    fun dismissDialog() {
+        _dialogState.value = MainDialogState.None
+    }
+
+    fun handleRestoreBackupUri(uri: android.net.Uri) {
+        viewModelScope.launch {
+             try {
+                 val fileName = "restore-${System.currentTimeMillis()}.zip"
+                 val file = localFileRepository.copyUriToCache(uri, fileName)
+                 val needsPassword = requiresPassword(file)
+                 if (needsPassword) {
+                     showRestorePasswordDialog(file)
+                 } else {
+                     restoreBackup(file, null)
+                 }
+             } catch (e: Exception) {
+                 Log.e("MainViewModel", "Error handling restore URI", e)
+                 _events.emit(UiEvent.Message(context.getString(R.string.error_reading_file)))
+             }
+        }
+    }
+
+    fun handleLinkFileUri(uri: android.net.Uri) {
+        viewModelScope.launch {
+            try {
+                val fileName = "download-link-${System.currentTimeMillis()}.link"
+                val file = localFileRepository.copyUriToCache(uri, fileName)
+                showLinkPasswordDialog(file)
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Error handling link URI", e)
+                _events.emit(UiEvent.Message(context.getString(R.string.error_reading_file)))
+            }
+        }
+    }
+
     
     init {
         // Mark config as loaded after first emission
@@ -251,6 +333,37 @@ class MainViewModel(
             taskQueueManager.addDownloadTasks(requests)
             _downloading.value = true
             _currentFileName.value = if (requests.size == 1) requests.first().file.fileName else "${requests.size} files"
+        }
+    }
+
+    fun handleUploads(uris: List<Uri>) {
+        viewModelScope.launch {
+            _uploading.value = true
+            val requests = mutableListOf<UploadRequest>()
+            
+            for (uri in uris) {
+                try {
+                    val meta = localFileRepository.getDocumentMeta(uri)
+                    requests.add(
+                        UploadRequest(
+                            uri = uri.toString(),
+                            displayName = meta.name,
+                            caption = null,
+                            sizeBytes = meta.size
+                        )
+                    )
+                } catch (e: Exception) {
+                    Log.e("MainViewModel", "Error processing upload URI: $uri", e)
+                }
+            }
+            
+            if (requests.isNotEmpty()) {
+                taskQueueManager.addUploadTasks(requests)
+                _currentFileName.value = if (requests.size == 1) requests.first().displayName else "${requests.size} files"
+            } else {
+                 _uploading.value = false
+                 _events.emit(UiEvent.Message(context.getString(R.string.error_reading_file)))
+            }
         }
     }
 
@@ -659,12 +772,13 @@ class MainViewModelFactory(
     private val context: Context,
     private val repository: TelegramRepository,
     private val backupManager: BackupManager,
-    private val taskQueueManager: TaskQueueManager
+    private val taskQueueManager: TaskQueueManager,
+    private val localFileRepository: com.telegram.cloud.data.repository.LocalFileRepository
 ) : androidx.lifecycle.ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(MainViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return MainViewModel(context, repository, backupManager, taskQueueManager) as T
+            return MainViewModel(context, repository, backupManager, taskQueueManager, localFileRepository) as T
         }
         throw IllegalArgumentException("Tipo de ViewModel no soportado")
     }
