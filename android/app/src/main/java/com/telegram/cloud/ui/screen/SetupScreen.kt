@@ -59,7 +59,8 @@ fun SetupScreen(
     initialSyncPassword: String? = null,
     onSave: (tokens: List<String>, channelId: String, chatId: String?, syncChannelId: String?, syncBotToken: String?, syncPassword: String?) -> Unit,
     onImportBackup: (() -> Unit)? = null,
-    onCancel: (() -> Unit)? = null
+    onCancel: (() -> Unit)? = null,
+    onLaunchWizard: (() -> Unit)? = null
 ) {
     val tokens = remember { mutableStateListOf("", "", "", "", "") }
     val channelId = remember { androidx.compose.runtime.mutableStateOf(initialChannelId.orEmpty()) }
@@ -95,6 +96,32 @@ fun SetupScreen(
             style = MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onBackground
         )
+        
+        // Wizard button (only for new setup, not editing)
+        if (!isEditing && onLaunchWizard != null) {
+            Button(
+                onClick = onLaunchWizard,
+                modifier = Modifier.fillMaxWidth().height(ComponentSize.buttonHeight),
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Sync,
+                    contentDescription = null,
+                    modifier = Modifier.size(ComponentSize.iconSmall)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(R.string.wizard_use_wizard), style = MaterialTheme.typography.labelLarge)
+            }
+            
+            Text(
+                text = stringResource(R.string.wizard_or_manual),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        }
 
         tokens.forEachIndexed { index, value ->
             val isValidToken = value.isNotBlank() && value.length > 10

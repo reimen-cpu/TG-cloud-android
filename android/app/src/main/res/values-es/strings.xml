@@ -160,5 +160,91 @@
     <string name="sync_stopped">Sincronización detenida</string>
     <string name="syncing_files">Sincronizando %1$d archivo(s)…</string>
     <string name="downloading_files">Descargando %1$d archivo(s)…</string>
+    
+    <!-- Setup Wizard -->
+    <string name="wizard_step_counter">Paso %1$d de %2$d</string>
+    <string name="wizard_next">Siguiente</string>
+    <string name="wizard_skip">Omitir</string>
+    <string name="wizard_complete">Completar Configuración</string>
+    <string name="wizard_retry">Reintentar</string>
+    <string name="wizard_optional">Opcional</string>
+    <string name="wizard_enabled">Habilitado</string>
+    <string name="wizard_use_same">Usar mismo</string>
+    
+    <!-- Welcome Step -->
+    <string name="wizard_welcome_title">Bienvenido a Telegram Cloud</string>
+    <string name="wizard_welcome_subtitle">Tu nube, tus reglas. Vamos a configurar tu almacenamiento en la nube personal.</string>
+    <string name="wizard_requirements_title">Lo que necesitarás</string>
+    <string name="wizard_requirement_bot">Un Bot de Telegram (de @BotFather)</string>
+    <string name="wizard_requirement_channel">Un Canal privado de Telegram</string>
+    <string name="wizard_requirement_internet">Conexión a Internet</string>
+    <string name="wizard_what_well_do_title">Lo que configuraremos</string>
+    <string name="wizard_what_well_do_description">Te guiaremos para configurar tu token de bot, conectar a tu canal, y opcionalmente configurar la sincronización multi-dispositivo.</string>
+    <string name="wizard_get_started">Comenzar</string>
+    
+    <!-- Bot Token Step -->
+    <string name="wizard_bot_token_title">Configura Tu Bot</string>
+    <string name="wizard_bot_token_description">Ingresa el token del bot que recibiste de @BotFather. Este bot administrará tus archivos en Telegram.</string>
+    <string name="wizard_how_to_get_token_title">¿Cómo obtener un token de bot?</string>
+    <string name="wizard_how_to_get_token_description">Abre @BotFather en Telegram, envía /newbot, sigue las instrucciones y copia el token. Toca aquí para abrir BotFather.</string>
+    <string name="wizard_bot_token_label">Token del Bot</string>
+    <string name="wizard_validate_token">Validar Token</string>
+    <string name="wizard_validating">Validando…</string>
+    
+    <!-- Channel Step -->
+    <string name="wizard_channel_title">Conecta Tu Canal</string>
+    <string name="wizard_channel_description">Ingresa el canal donde se guardarán tus archivos. Asegúrate de que tu bot sea administrador de este canal.</string>
+    <string name="wizard_channel_instructions_title">Cómo configurar</string>
+    <string name="wizard_channel_instructions_description">1. Crea un canal privado en Telegram\n2. Agrega tu bot como administrador\n3. Reenvía un mensaje del canal a @userinfobot para obtener el ID</string>
+    <string name="wizard_detect_channels">Auto-detectar canales</string>
+    <string name="wizard_detected_channels">Canales Detectados</string>
+    <string name="wizard_no_channels_found">No se encontraron canales. Envía un mensaje en tu canal primero, luego intenta de nuevo.</string>
+    <string name="wizard_or_enter_manually">O ingresa manualmente</string>
+    <string name="wizard_channel_id_label">ID del Canal</string>
+    <string name="wizard_channel_must_start_dash">El ID del canal debe comenzar con -</string>
+    <string name="wizard_channel_invalid_format">Formato de ID de canal inválido</string>
+    <string name="wizard_admin_required_title">⚠️ Permiso de Administrador Requerido</string>
+    <string name="wizard_admin_required_description">Tu bot DEBE ser agregado como administrador al canal. Sin permisos de administrador, el bot no puede publicar archivos ni administrar contenido.</string>
+    
+    <!-- Sync Password Step -->
+    <string name="wizard_sync_title">Sincronización Multi-Dispositivo</string>
+    <string name="wizard_sync_description">Habilita la sincronización para compartir tu nube entre múltiples dispositivos. Tus datos se encriptan con tu contraseña.</string>
+    <string name="wizard_tap_to_copy_channel">Toca el icono para usar el mismo canal</string>
+    <string name="wizard_tap_to_copy_token">Toca el icono para usar el mismo token</string>
+    <string name="wizard_password_strength">Fortaleza de Contraseña</string>
+    <string name="wizard_password_weak">Débil</string>
+    <string name="wizard_password_medium">Media</string>
+    <string name="wizard_password_strong">Fuerte</string>
+    <string name="wizard_password_very_strong">Muy Fuerte</string>
+    <string name="wizard_sync_tip_title">Consejo</string>
+    <string name="wizard_sync_tip_description">Puedes cambiar la contraseña de sincronización después para cambiar entre diferentes nubes compartidas (ej., Familia, Trabajo, Personal).</string>
+    
+    <!-- Additional Tokens Step -->
+    <string name="wizard_additional_tokens_title">Aumenta el Rendimiento</string>
+    <string name="wizard_additional_tokens_description">Agrega más tokens de bot para aumentar la velocidad de subida y descarga. Cada token agrega capacidad paralela.</string>
+    <string name="wizard_tokens_benefits_title">Beneficios de múltiples tokens</string>
+    <string name="wizard_tokens_benefits_description">• Subidas y descargas más rápidas\n• Mejor manejo de archivos grandes\n• Distribución automática de carga\n• Hasta 5x de mejora en velocidad</string>
+    
+    <!-- Verification Step -->
+    <string name="wizard_verification_title">Verificar Configuración</string>
+    <string name="wizard_verification_description">Verifiquemos que todo esté configurado correctamente antes de terminar.</string>
+    <string name="wizard_summary_title">Resumen de Configuración</string>
+    <string name="wizard_summary_tokens">Tokens de Bot</string>
+    <string name="wizard_summary_channel">ID del Canal</string>
+    <string name="wizard_summary_sync">Sincronización</string>
+    <string name="wizard_connection_test_title">Prueba de Conexión</string>
+    <string name="wizard_test_connection">Probar Conexión</string>
+    <string name="wizard_test_connection_description">Enviaremos un mensaje de prueba a tu canal para verificar que todo funcione.</string>
+    <string name="wizard_import_backup">Importar Respaldo</string>
+    <string name="wizard_open_channel">Abrir Canal en Telegram</string>
+    <string name="wizard_testing">Probando conexión…</string>
+    <string name="wizard_connection_success">¡Conexión exitosa! Tu nube está lista.</string>
+    <string name="wizard_bot_no_permission">El bot no tiene permiso para publicar en el canal</string>
+    <string name="wizard_bot_not_admin">El bot debe ser administrador del canal. Por favor agrega el bot como administrador e intenta de nuevo.</string>
+    <string name="wizard_channel_access_error">No se puede acceder al canal. Verifica el ID y los permisos del bot.</string>
+    
+    <!-- Setup Screen -->
+    <string name="wizard_use_wizard">Usar Asistente de Configuración</string>
+    <string name="wizard_or_manual">O configura manualmente abajo</string>
 </resources>
 

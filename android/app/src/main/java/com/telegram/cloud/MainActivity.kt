@@ -507,6 +507,7 @@ class MainActivity : ComponentActivity() {
                         val showSetup = dashboard.isConfigLoaded && (editingConfig || config == null)
                         var showGallery by rememberSaveable { mutableStateOf(false) }
                         var showTaskQueue by rememberSaveable { mutableStateOf(false) }
+                        var showWizard by rememberSaveable { mutableStateOf(false) }
                         
                         // Gallery state
 
@@ -655,22 +656,30 @@ class MainActivity : ComponentActivity() {
                             !dashboard.isConfigLoaded -> {
                                 SplashScreen()
                             }
-                            showSetup -> {
-                            SetupScreen(
-                                isEditing = config != null,
-                                initialTokens = config?.tokens ?: emptyList(),
-                                initialChannelId = config?.channelId,
-                                initialChatId = config?.chatId,
-                                initialSyncChannelId = config?.syncChannelId,
-                                initialSyncBotToken = config?.syncBotToken,
-                                initialSyncPassword = config?.syncPassword,
-                                onSave = { tokens, channelId, chatId, syncChannelId, syncBotToken, syncPassword ->
-                                    viewModel.saveConfig(tokens, channelId, chatId, syncChannelId, syncBotToken, syncPassword)
-                                    editingConfig = false
-                                },
-                                onImportBackup = { restoreLauncher.launch(arrayOf("application/zip")) },
-                                onCancel = if (config != null) { { editingConfig = false } } else null
-                            )
+                            showSetup || showWizard -> {
+                                // Wizard ViewModel
+                                val wizardViewModel: com.telegram.cloud.ui.wizard.WizardViewModel = viewModel(
+                                    factory = com.telegram.cloud.ui.wizard.WizardViewModelFactory(
+                                        context,
+                                        container.repository
+                                    )
+                                )
+                                
+                                com.telegram.cloud.ui.wizard.WizardScreen(
+                                    viewModel = wizardViewModel,
+                                    onComplete = { completedConfig ->
+                                        showWizard = false
+                                        editingConfig = false
+                                    },
+                                    onCancel = if (config != null) {
+                                        {
+                                            showWizard = false
+                                            editingConfig = false
+                                        }
+                                    } else null,
+                                    onImportBackup = { restoreLauncher.launch(arrayOf("application/zip")) },
+                                    existingConfig = if (editingConfig) config else null
+                                )
                             }
                             showGallery && config != null -> {
                                 // State for media viewer
