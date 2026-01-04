@@ -155,6 +155,7 @@
     <string name="error_with_message">Error: %1$s</string>
     <string name="error_reading_file">Error reading file: %1$s</string>
     <string name="unknown_error">Unknown</string>
+    <string name="file_not_found_in_gallery">File not found in gallery</string>
     
     <!-- MainActivity snackbar messages -->
     <string name="link_file_shared_simple">.link file shared</string>

@@ -508,6 +508,7 @@ class MainActivity : AppCompatActivity() {
                         // Show setup only when config is loaded AND empty, or when editing
                         val showSetup = dashboard.isConfigLoaded && (editingConfig || config == null)
                         var showGallery by rememberSaveable { mutableStateOf(false) }
+                        var selectedMedia by rememberSaveable { mutableStateOf<Long?>(null) }
                         var showTaskQueue by rememberSaveable { mutableStateOf(false) }
                         var showWizard by rememberSaveable { mutableStateOf(false) }
                         
@@ -522,6 +523,7 @@ class MainActivity : AppCompatActivity() {
                         val galleryFilterState by galleryViewModel.filterState.collectAsState()
                         val galleryRestoreState by galleryViewModel.restoreState.collectAsState()
                         val galleryRestoreProgress by galleryViewModel.restoreProgress.collectAsState()
+                        val streamingProgress by galleryViewModel.streamingProgress.collectAsState()
                         
                         // Determine if any operation is active
                         val isGallerySyncing = gallerySyncState is com.telegram.cloud.gallery.GallerySyncManager.SyncState.Syncing
@@ -683,9 +685,74 @@ class MainActivity : AppCompatActivity() {
                                     existingConfig = if (editingConfig) config else null
                                 )
                             }
+                            // Media Viewer (Overlay) - Decoupled from Gallery
+                            selectedMedia != null && config != null -> {
+                                val mediaToView = galleryUiState.currentMedia.find { it.id == selectedMedia }
+                                
+                                if (mediaToView != null) {
+                                    val isCurrentlySyncing = when (val state = gallerySyncState) {
+                                        is com.telegram.cloud.gallery.GallerySyncManager.SyncState.Syncing -> {
+                                            state.currentFile == mediaToView.filename
+                                        }
+                                        else -> false
+                                    }
+                                    
+                                    val currentUploadProgress = if (isCurrentlySyncing) gallerySyncProgress else 0f
+                                    val currentSyncMediaId = if (gallerySyncState is com.telegram.cloud.gallery.GallerySyncManager.SyncState.Syncing) {
+                                        galleryUiState.currentMedia.find { 
+                                            it.filename == (gallerySyncState as com.telegram.cloud.gallery.GallerySyncManager.SyncState.Syncing).currentFile 
+                                        }?.id
+                                    } else null
+                                    
+                                    val isAnySyncing = gallerySyncState is com.telegram.cloud.gallery.GallerySyncManager.SyncState.Syncing
+                                    
+                                    // Handle Back: Just close viewer, do not force Gallery state
+                                    BackHandler(enabled = true) {
+                                        selectedMedia = null
+                                    }
+
+                                    MediaViewerScreen(
+                                        initialMediaId = mediaToView.id,
+                                        mediaList = galleryUiState.currentMedia,
+                                        onBack = { selectedMedia = null },
+                                        onSync = { mediaToSync ->
+                                            config?.let { cfg ->
+                                                galleryViewModel.syncSingleMedia(
+                                                    media = mediaToSync,
+                                                    config = cfg,
+                                                    onProgress = null
+                                                )
+                                            }
+                                        },
+                                        onDownloadFromTelegram = { mediaToDownload, onProgress, onSuccess, onError ->
+                                            config?.let { cfg ->
+                                                galleryViewModel.downloadFromTelegram(
+                                                    media = mediaToDownload,
+                                                    config = cfg,
+                                                    onProgress = onProgress,
+                                                    onSuccess = onSuccess,
+                                                    onError = onError
+                                                )
+                                            } ?: onError("Config not available")
+                                        },
+                                        onFileDownloaded = { mediaId, localPath ->
+                                            galleryViewModel.updateLocalPath(mediaId, localPath)
+                                        },
+                                        onSyncClick = { progress -> },
+                                        isSyncing = isAnySyncing,
+                                        currentSyncMediaId = currentSyncMediaId,
+                                        uploadProgress = gallerySyncProgress,
+                                        config = config,
+                                        getStreamingManager = { media, cfg -> galleryViewModel.getOrInitStreamingManager(media, cfg) }
+                                    )
+                                } else {
+                                    // If media not found, reset selection
+                                    selectedMedia = null
+                                }
+                            }
                             showGallery && config != null -> {
                                 // State for media viewer
-                                var selectedMedia by rememberSaveable { mutableStateOf<Long?>(null) }
+
                                 var showTrash by rememberSaveable { mutableStateOf(false) }
                                 
                                 // State for context menu
@@ -697,17 +764,9 @@ class MainActivity : AppCompatActivity() {
                                 // State for batch delete
                                 var mediaToDeleteBatch by remember { mutableStateOf<List<GalleryMediaEntity>?>(null) }
                                 
-                                // Find selected media from list
-                                val mediaToView = selectedMedia?.let { id ->
-                                    galleryUiState.currentMedia.find { it.id == id }
-                                }
-                                
                                 // Handle system back button
                                 BackHandler(enabled = true) {
-                                    when {
-                                        mediaToView != null -> selectedMedia = null
-                                        else -> showGallery = false
-                                    }
+                                    showGallery = false
                                 }
                                 
                                 // Context menu dialog
@@ -871,66 +930,6 @@ class MainActivity : AppCompatActivity() {
                                         onEmptyTrash = { galleryViewModel.emptyTrash(config) },
                                         onRestoreAll = { galleryViewModel.restoreFromTrash(trashItems) }
                                     )
-                                } else if (mediaToView != null) {
-                                    // Check if this media is currently being synced
-                                    val isCurrentlySyncing = when (val state = gallerySyncState) {
-                                        is com.telegram.cloud.gallery.GallerySyncManager.SyncState.Syncing -> {
-                                            state.currentFile == mediaToView.filename
-                                        }
-                                        else -> false
-                                    }
-                                    
-                                    // Use the progress from GallerySyncManager directly
-                                    val currentUploadProgress = if (isCurrentlySyncing) gallerySyncProgress else 0f
-                                    
-                                    // Show full screen viewer
-                                    // Calculate sync state for the viewer
-                                    val currentSyncMediaId = if (gallerySyncState is com.telegram.cloud.gallery.GallerySyncManager.SyncState.Syncing) {
-                                        // We need to find the media ID for the current syncing file
-                                        // This is a bit inefficient but safe: find media with this filename
-                                        galleryUiState.currentMedia.find { 
-                                            it.filename == (gallerySyncState as com.telegram.cloud.gallery.GallerySyncManager.SyncState.Syncing).currentFile 
-                                        }?.id
-                                    } else null
-                                    
-                                    val isAnySyncing = gallerySyncState is com.telegram.cloud.gallery.GallerySyncManager.SyncState.Syncing
-
-                                    MediaViewerScreen(
-                                        initialMediaId = mediaToView.id,
-                                        mediaList = galleryUiState.currentMedia,
-                                        onBack = { selectedMedia = null },
-                                        onSync = { mediaToSync ->
-                                            config?.let { cfg ->
-                                                galleryViewModel.syncSingleMedia(
-                                                    media = mediaToSync,
-                                                    config = cfg,
-                                                    onProgress = null // Progress is handled by GallerySyncManager
-                                                )
-                                            }
-                                        },
-                                        onDownloadFromTelegram = { mediaToDownload, onProgress, onSuccess, onError ->
-                                            config?.let { cfg ->
-                                                galleryViewModel.downloadFromTelegram(
-                                                    media = mediaToDownload,
-                                                    config = cfg,
-                                                    onProgress = onProgress,
-                                                    onSuccess = onSuccess,
-                                                    onError = onError
-                                                )
-                                            } ?: onError("Config not available")
-                                        },
-                                        onFileDownloaded = { mediaId, localPath ->
-                                            // Update database with new local path for chunked streaming downloads
-                                            galleryViewModel.updateLocalPath(mediaId, localPath)
-                                        },
-                                        onSyncClick = { progress ->
-                                            // Progress is handled by GallerySyncManager
-                                        },
-                                        isSyncing = isAnySyncing,
-                                        currentSyncMediaId = currentSyncMediaId,
-                                        uploadProgress = gallerySyncProgress,
-                                        config = config
-                                    )
                                 } else {
                                     // Show gallery grid
                                     CloudGalleryScreen(
@@ -939,6 +938,7 @@ class MainActivity : AppCompatActivity() {
                                         onUpdateFilter = { update -> galleryViewModel.updateFilter(update) },
                                         syncState = gallerySyncState,
                                         syncProgress = gallerySyncProgress,
+                                        streamingProgress = streamingProgress,
                                         restoreState = galleryRestoreState,
                                         restoreProgress = galleryRestoreProgress,
                                         syncedCount = gallerySyncedCount,
@@ -1107,6 +1107,25 @@ class MainActivity : AppCompatActivity() {
                                 onShareMultiple = { files ->
                                     filesToShareBatch = files
                                     showShareDialog = true
+                                },
+                                onViewMedia = { file ->
+                                    // Navigate to gallery and open media viewer for this file
+                                    // Find matching gallery media by filename or message ID
+                                    scope.launch {
+                                        val matchingMedia = galleryViewModel.findMediaByFile(
+                                            fileMessageId = file.messageId, 
+                                            fileName = file.fileName,
+                                            fileId = file.fileId,
+                                            fileSize = file.sizeBytes,
+                                            date = file.uploadedAt
+                                        )
+                                        if (matchingMedia != null) {
+                                            showGallery = true
+                                            selectedMedia = matchingMedia.id
+                                        } else {
+                                            snackbarHostState.showSnackbar(context.getString(R.string.file_not_found_in_gallery))
+                                        }
+                                    }
                                 },
                                 onCancelTask = { taskId ->
                                     scope.launch {

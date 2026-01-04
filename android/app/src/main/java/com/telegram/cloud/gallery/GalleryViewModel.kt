@@ -62,14 +62,24 @@ class GalleryViewModel(
         val sortBy: SortBy = SortBy.DATE,
         val sortOrder: SortOrder = SortOrder.DESCENDING
     )
+    
+    // Streaming State
+    private val _streamingProgress = MutableStateFlow<Map<Long, Float>>(emptyMap())
+    val streamingProgress = _streamingProgress.asStateFlow()
+    
+    private val activeStreamingManagers = mutableMapOf<Long, com.telegram.cloud.gallery.streaming.ChunkedStreamingManager>()
 
     val uiState: StateFlow<GalleryUiState> = combine(
         _mediaList,
         _filterState
-    ) { mediaList, filter ->
+    ) { list, filter -> Pair(list, filter) }
+    .transformLatest { (mediaList, filter) ->
+        // Emit loading state immediately with empty lists to prevent stale data
+        emit(GalleryUiState(isLoading = true))
+        
         // Run heavy grouping and filtering on Default dispatcher
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            val albums = AlbumGrouper.groupByAlbums(mediaList)
+        val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+             val albums = AlbumGrouper.groupByAlbums(mediaList)
             
             var filteredMedia = if (filter.selectedAlbumPath != null) {
                 AlbumGrouper.getMediaForAlbum(mediaList, filter.selectedAlbumPath)
@@ -129,7 +139,8 @@ class GalleryViewModel(
                 isLoading = false
             )
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), GalleryUiState())
+        emit(result)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), GalleryUiState(isLoading = true))
     
     private fun isSameDay(cal1: java.util.Calendar, cal2: java.util.Calendar): Boolean {
         return cal1.get(java.util.Calendar.YEAR) == cal2.get(java.util.Calendar.YEAR) &&
@@ -464,6 +475,139 @@ class GalleryViewModel(
                 Log.d(TAG, "Updated local path for media ID $mediaId: $localPath")
             } catch (e: Exception) {
                 Log.e(TAG, "Error updating local path", e)
+            }
+        }
+    }
+
+    /**
+     * Find a gallery media entity corresponding to a CloudFile.
+     * Searches by telegram message ID preferably, then by filename.
+     */
+    suspend fun findMediaByFile(fileMessageId: Long, fileName: String, fileId: String? = null, fileSize: Long = 0, date: Long = 0): GalleryMediaEntity? {
+        Log.d(TAG, "findMediaByFile: Searching for messageId=$fileMessageId, fileName='$fileName'")
+        
+        // Try to find by message ID first (most reliable)
+        val byMessageId = galleryDao.getByTelegramMessageId(fileMessageId.toInt())
+        if (byMessageId != null) {
+            Log.d(TAG, "findMediaByFile: Found by ID: ${byMessageId.id} (${byMessageId.filename})")
+            return byMessageId
+        }
+        
+        // Fallback to filename
+        val byName = galleryDao.getByFilename(fileName)
+        if (byName != null) {
+            Log.d(TAG, "findMediaByFile: Found by filename: ${byName.id}")
+            return byName
+        }
+        
+        // If not found, and we have fileId (streaming/cloud file), create a temporary entity
+        if (fileId != null) {
+            Log.d(TAG, "findMediaByFile: Not found locally, creating cloud entity for $fileName")
+            val mimeType = if (fileName.endsWith(".mp4", ignoreCase = true) || fileName.endsWith(".mkv", ignoreCase = true)) "video/mp4" else "image/jpeg" 
+            // Better mime detection would be ideal but simple is okay for now
+            
+            val newEntity = GalleryMediaEntity(
+                localPath = "cloud:$fileId", // Placeholder path
+                filename = fileName,
+                mimeType = mimeType,
+                sizeBytes = fileSize,
+                dateTaken = date,
+                dateModified = date,
+                isSynced = true,
+                telegramFileId = fileId, // Use this for standard file_id
+                telegramMessageId = fileMessageId.toInt(),
+                // Use fileId as unique ID if it looks like a UUID (chunked), otherwise just standard ID
+                telegramFileUniqueId = if (fileId.length > 20 && fileId.contains("-")) fileId else null 
+            )
+            
+            val newId = galleryDao.insert(newEntity)
+            return newEntity.copy(id = newId)
+        }
+        
+        Log.d(TAG, "findMediaByFile: Not found by either method and no fileId provided")
+        return null
+    }
+
+    /**
+     * Get or initialize a streaming manager for a specific media item.
+     * This allows sharing the download manager between MediaViewer and background tasks.
+     */
+    /**
+     * Get or initialize a streaming manager for a specific media item.
+     * This allows sharing the download manager between MediaViewer and background tasks.
+     */
+    fun getOrInitStreamingManager(
+        media: GalleryMediaEntity,
+        config: com.telegram.cloud.data.prefs.BotConfig
+    ): com.telegram.cloud.gallery.streaming.ChunkedStreamingManager {
+        return activeStreamingManagers.getOrPut(media.id) {
+            com.telegram.cloud.gallery.streaming.ChunkedStreamingManager(context).apply {
+                val fileId = media.telegramFileId ?: media.telegramFileUniqueId?.split(",")?.firstOrNull() ?: ""
+                val chunkFileIds = media.telegramFileUniqueId ?: ""
+                val uploaderTokens = media.telegramUploaderTokens ?: config.tokens.first()
+                initStreaming(fileId, chunkFileIds, uploaderTokens, config)
+                
+                // Observe progress and handle completion
+                viewModelScope.launch {
+                    totalProgress.collect { progress ->
+                        _streamingProgress.update { current ->
+                            current + (media.id to progress)
+                        }
+                        
+                        if (progress >= 1.0f) {
+                            Log.d(TAG, "Download complete for ${media.filename}, finalizing...")
+                            finalizeDownload(media, this@apply)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun finalizeDownload(media: GalleryMediaEntity, manager: com.telegram.cloud.gallery.streaming.ChunkedStreamingManager) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                // Determine permanent storage location (Pictures/TelegramCloud)
+                val galleryDir = java.io.File(
+                    android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES), 
+                    "TelegramCloud"
+                )
+                if (!galleryDir.exists()) galleryDir.mkdirs()
+                
+                val finalFile = java.io.File(galleryDir, media.filename)
+                
+                // Reassemble chunks into final file
+                if (manager.reassembleFile(finalFile)) {
+                    Log.d(TAG, "File finalized at ${finalFile.absolutePath}")
+                    
+                    // Update database with new local path
+                    galleryDao.updateLocalPath(media.id, finalFile.absolutePath)
+                    
+                    // Scan so system gallery sees it
+                    try {
+                        android.media.MediaScannerConnection.scanFile(
+                            context, 
+                            arrayOf(finalFile.absolutePath), 
+                            arrayOf(media.mimeType), 
+                            null
+                        )
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to scan file: ${e.message}")
+                    }
+                    
+                    // Release manager and clean up cache (chunks)
+                    manager.release(keepChunks = false)
+                    activeStreamingManagers.remove(media.id)
+                    
+                    // Update streaming progress map to remove it
+                    _streamingProgress.update { current ->
+                        current - media.id
+                    }
+                } else {
+                    Log.e(TAG, "Failed to reassemble file ${media.filename}")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error finalizing download for ${media.filename}", e)
             }
         }
     }

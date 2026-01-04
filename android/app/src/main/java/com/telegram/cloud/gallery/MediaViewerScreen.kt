@@ -103,7 +103,8 @@ fun MediaViewerScreen(
     currentSyncMediaId: Long? = null,
     uploadProgress: Float = 0f,
     config: com.telegram.cloud.data.prefs.BotConfig? = null,
-    onFileDownloaded: ((Long, String) -> Unit)? = null
+    onFileDownloaded: ((Long, String) -> Unit)? = null,
+    getStreamingManager: ((GalleryMediaEntity, com.telegram.cloud.data.prefs.BotConfig) -> com.telegram.cloud.gallery.streaming.ChunkedStreamingManager?)? = null
 ) {
     if (mediaList.isEmpty()) {
         onBack()
@@ -140,7 +141,8 @@ fun MediaViewerScreen(
                 isSyncing = isCurrentPageSyncing,
                 uploadProgress = if (isCurrentPageSyncing) uploadProgress else 0f,
                 config = config,
-                onFileDownloaded = { path -> onFileDownloaded?.invoke(media.id, path) }
+                onFileDownloaded = { path -> onFileDownloaded?.invoke(media.id, path) },
+                getStreamingManager = getStreamingManager
             )
         }
     }
@@ -156,7 +158,8 @@ fun MediaViewerPage(
     isSyncing: Boolean = false,
     uploadProgress: Float = 0f,
     config: com.telegram.cloud.data.prefs.BotConfig? = null,
-    onFileDownloaded: ((String) -> Unit)? = null
+    onFileDownloaded: ((String) -> Unit)? = null,
+    getStreamingManager: ((GalleryMediaEntity, com.telegram.cloud.data.prefs.BotConfig) -> com.telegram.cloud.gallery.streaming.ChunkedStreamingManager?)? = null
 ) {
     var showControls by remember { mutableStateOf(true) }
     
@@ -177,9 +180,19 @@ fun MediaViewerPage(
         } else null
     }
     
-    val streamingManager = remember(media.id) {
+    val streamingManager = remember(media.id, config) {
         if (media.isVideo && media.isChunked && config != null) {
-            ChunkedStreamingManager(context)
+            if (getStreamingManager != null) {
+                getStreamingManager(media, config)
+            } else {
+                // Fallback for previews without global manager
+                ChunkedStreamingManager(context).apply {
+                    val fileId = media.telegramFileId ?: media.telegramFileUniqueId?.split(",")?.firstOrNull() ?: ""
+                    val chunkFileIds = media.telegramFileUniqueId ?: ""
+                    val uploaderTokens = media.telegramUploaderTokens ?: config.tokens.first()
+                    initStreaming(fileId, chunkFileIds, uploaderTokens, config)
+                }
+            }
         } else null
     }
     
@@ -209,6 +222,16 @@ fun MediaViewerPage(
             // Upload was cancelled or failed - only reset if we were actually uploading
             // and sync is truly done (not just starting)
             uploadState = MediaUploadState.Idle
+        }
+    }
+    
+    // Release player when leaving the screen or changing media
+    DisposableEffect(media.id) {
+        onDispose {
+            Log.d(TAG, "Disposing MediaViewerPage for ${media.filename}")
+            chunkedPlayer?.release()
+            // We DO NOT release streamingManager here because we want downloads to continue in background
+            // The streamingManager will be cleaned up eventually or reused
         }
     }
     

@@ -39,6 +39,7 @@ import java.util.concurrent.TimeUnit
 fun MediaThumbnail(
     media: GalleryMediaEntity,
     isSelected: Boolean = false,
+    downloadProgress: Float? = null,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -101,45 +102,53 @@ fun MediaThumbnail(
                         }
                     }
                     .build(),
-                contentDescription = media.filename,
-                modifier = Modifier.fillMaxSize(),
+                contentDescription = null,
                 contentScale = ContentScale.Crop,
-                error = painterResource(id = R.drawable.ic_launcher_foreground),
-                fallback = painterResource(id = R.drawable.ic_launcher_foreground)
+                modifier = Modifier.fillMaxSize()
             )
         } else {
-            // Placeholder when no thumbnail or local file exists
+             // Fallback icon
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    if (media.isVideo) Icons.Default.Videocam else Icons.Default.Image,
-                    contentDescription = null,
-                    tint = materialTheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.size(32.dp)
-                )
+                 Icon(
+                     if (media.isVideo) Icons.Default.Videocam else Icons.Default.Image,
+                     contentDescription = null,
+                     tint = materialTheme.onSurfaceVariant.copy(alpha = 0.5f)
+                 )
             }
         }
         
-        // Overlay for missing local file (but synced)
-        if (!localFileExists && media.isSynced) {
+        // Video Duration & Type Overlay
+        if (media.isVideo) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.3f)),
-                contentAlignment = Alignment.Center
+                    .padding(4.dp),
+                contentAlignment = Alignment.BottomStart
             ) {
-                Icon(
-                    Icons.Default.CloudDownload,
-                    contentDescription = stringResource(R.string.download_from_cloud),
-                    tint = Color.White.copy(alpha = 0.8f),
-                    modifier = Modifier.size(24.dp)
-                )
+                // Duration Badge
+                Box(
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.6f), MaterialTheme.shapes.extraSmall)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    val durationSeconds = media.durationMs / 1000
+                    val minutes = durationSeconds / 60
+                    val seconds = durationSeconds % 60
+                    Text(
+                        text = String.format("%d:%02d", minutes, seconds),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
         
-        // Selection indicator
+        // Selection Overlay - Semi-transparent blue and checkmark
         if (isSelected) {
             Box(
                 modifier = Modifier
@@ -147,54 +156,22 @@ fun MediaThumbnail(
                     .background(materialTheme.primary.copy(alpha = 0.3f)),
                 contentAlignment = Alignment.TopEnd
             ) {
-                Box(
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = materialTheme.primary,
                     modifier = Modifier
-                        .padding(6.dp)
+                        .padding(4.dp)
                         .size(24.dp)
-                        .background(
-                            materialTheme.primary,
-                            CircleShape
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.Check,
-                        contentDescription = stringResource(R.string.selected),
-                        tint = materialTheme.onPrimary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-        }
-        
-        // Video duration badge
-        if (media.isVideo && media.durationMs > 0) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(6.dp)
-                    .background(
-                        Color.Black.copy(alpha = 0.75f),
-                        MaterialTheme.shapes.small
-                    )
-                    .padding(horizontal = 5.dp, vertical = 3.dp)
-            ) {
-                Text(
-                    text = formatDuration(media.durationMs),
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
+                        .background(Color.White, CircleShape)
                 )
             }
         }
         
-        // Sync status indicator (Cloud icon)
-        // Show if synced AND NOT selected (selection overlay takes precedence)
+        // Sync Status Icons (Top Right when not selected, or slightly offset)
         if (!isSelected) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(6.dp)
             ) {
                  Box(
                     modifier = Modifier

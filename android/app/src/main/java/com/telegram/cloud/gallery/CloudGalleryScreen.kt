@@ -98,6 +98,7 @@ private val MediaDisplayModeSaver = androidx.compose.runtime.saveable.Saver<Medi
 fun CloudGalleryScreen(
     uiState: GalleryViewModel.GalleryUiState,
     filterState: GalleryViewModel.FilterState,
+    streamingProgress: Map<Long, Float> = emptyMap(),
     onUpdateFilter: (GalleryViewModel.FilterState.() -> GalleryViewModel.FilterState) -> Unit,
     syncState: GallerySyncManager.SyncState,
     syncProgress: Float,
@@ -790,6 +791,7 @@ fun CloudGalleryScreen(
                                     columns = 3,
                                     isSelectionMode = isSelectionMode,
                                     selectedMediaIds = selectedMediaIds,
+                                    streamingProgress = streamingProgress,
                                     onMediaClick = { media ->
                                         if (isSelectionMode) {
                                             selectedMediaIds = if (selectedMediaIds.contains(media.id)) {
@@ -818,6 +820,7 @@ fun CloudGalleryScreen(
                                     columns = 4,
                                     isSelectionMode = isSelectionMode,
                                     selectedMediaIds = selectedMediaIds,
+                                    streamingProgress = streamingProgress,
                                     onMediaClick = { media ->
                                         if (isSelectionMode) {
                                             selectedMediaIds = if (selectedMediaIds.contains(media.id)) {
@@ -1113,6 +1116,7 @@ private fun MediaGrid(
     columns: Int,
     isSelectionMode: Boolean,
     selectedMediaIds: Set<Long>,
+    streamingProgress: Map<Long, Float> = emptyMap(),
     onMediaClick: (GalleryMediaEntity) -> Unit,
     onMediaLongClick: (GalleryMediaEntity) -> Unit
 ) {
@@ -1147,6 +1151,7 @@ private fun MediaGrid(
                 MediaThumbnail(
                     media = mediaItem,
                     isSelected = isSelectionMode && selectedMediaIds.contains(mediaItem.id),
+                    downloadProgress = streamingProgress[mediaItem.id],
                     onClick = { onMediaClick(mediaItem) },
                     onLongClick = { onMediaLongClick(mediaItem) }
                 )

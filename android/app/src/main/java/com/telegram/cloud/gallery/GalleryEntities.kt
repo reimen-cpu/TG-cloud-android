@@ -98,6 +98,12 @@ interface GalleryMediaDao {
     
     @Query("UPDATE gallery_media SET is_synced = 1, telegram_file_id = :fileId, telegram_message_id = :messageId, sync_error = NULL WHERE id = :id")
     suspend fun markSynced(id: Long, fileId: String, messageId: Int)
+
+    @Query("SELECT * FROM gallery_media WHERE telegram_message_id = :messageId LIMIT 1")
+    suspend fun getByTelegramMessageId(messageId: Int): GalleryMediaEntity?
+
+    @Query("SELECT * FROM gallery_media WHERE filename = :filename LIMIT 1")
+    suspend fun getByFilename(filename: String): GalleryMediaEntity?
     
     @Query("""
         UPDATE gallery_media 

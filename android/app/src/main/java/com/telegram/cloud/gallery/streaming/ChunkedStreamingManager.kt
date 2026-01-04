@@ -62,6 +62,13 @@ class ChunkedStreamingManager(
         uploaderTokens: String,
         config: BotConfig
     ) {
+        // Prevent re-initialization if already initialized with same fileId
+        // This allows calling initStreaming multiple times safely (e.g. from UI recompositions)
+        if (streamingDir?.name == fileId && this.chunkFileIds.isNotEmpty()) {
+            Log.d(TAG, "Streaming already initialized for $fileId, skipping re-init")
+            return
+        }
+
         this.config = config
         this.chunkFileIds = chunkFileIds.split(",").map { it.trim() }
         this.uploaderTokens = uploaderTokens.split(",").map { it.trim() }
