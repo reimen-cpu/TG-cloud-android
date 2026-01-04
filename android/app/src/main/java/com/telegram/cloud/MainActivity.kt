@@ -711,9 +711,12 @@ class MainActivity : AppCompatActivity() {
                                         selectedMedia = null
                                     }
 
-                                    MediaViewerScreen(
-                                        initialMediaId = mediaToView.id,
-                                        mediaList = galleryUiState.currentMedia,
+                                    // Get fresh media entity from state to pick up DB updates (e.g., localPath after download)
+                                    val freshMedia = galleryUiState.currentMedia.find { it.id == selectedMedia }
+                                    if (freshMedia != null) {
+                                        MediaViewerScreen(
+                                            initialMediaId = freshMedia.id,
+                                            mediaList = listOf(freshMedia), // Use fresh entity that updates with DB
                                         onBack = { selectedMedia = null },
                                         onSync = { mediaToSync ->
                                             config?.let { cfg ->
@@ -745,9 +748,7 @@ class MainActivity : AppCompatActivity() {
                                         config = config,
                                         getStreamingManager = { media, cfg -> galleryViewModel.getOrInitStreamingManager(media, cfg) }
                                     )
-                                } else {
-                                    // If media not found, reset selection
-                                    selectedMedia = null
+                                    }
                                 }
                             }
                             showGallery && config != null -> {
@@ -1120,7 +1121,6 @@ class MainActivity : AppCompatActivity() {
                                             date = file.uploadedAt
                                         )
                                         if (matchingMedia != null) {
-                                            showGallery = true
                                             selectedMedia = matchingMedia.id
                                         } else {
                                             snackbarHostState.showSnackbar(context.getString(R.string.file_not_found_in_gallery))

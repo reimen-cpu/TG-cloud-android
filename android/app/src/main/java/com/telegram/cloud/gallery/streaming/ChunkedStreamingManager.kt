@@ -104,22 +104,43 @@ class ChunkedStreamingManager(
     
     /**
      * Get input stream for a chunk (blocks until chunk is available)
+     * Prioritizes sequential chunks over far-ahead chunks (e.g., last chunk for metadata)
      */
     suspend fun getChunkStream(chunkIndex: Int): InputStream? {
         if (chunkIndex >= chunkFileIds.size) return null
         
         val chunkFile = getChunkFile(chunkIndex)
         
-        // If chunk exists and is complete, return stream
+        // If chunk exists and is complete, return stream immediately
         if (chunkFile.exists() && isChunkComplete(chunkIndex)) {
             return FileInputStream(chunkFile)
+        }
+        
+        // Check if this is a "far ahead" chunk request (e.g., last chunk for metadata)
+        val availableChunks = _availableChunks.value
+        val maxAvailable = availableChunks.maxOrNull() ?: -1
+        val isFarAhead = chunkIndex > maxAvailable + 10 && chunkIndex > 10
+        
+        if (isFarAhead) {
+            // Don't block on far-ahead chunks, return null to let player continue with available data
+            Log.d(TAG, "Deferring far-ahead chunk $chunkIndex (max available: $maxAvailable)")
+            // Still start download in background, but don't wait
+            startChunkDownload(chunkIndex)
+            return null
         }
         
         // Start downloading this chunk if not already
         startChunkDownload(chunkIndex)
         
-        // Wait for chunk to be available
+        // Wait for chunk to be available (with timeout for non-critical chunks)
+        val startTime = System.currentTimeMillis()
+        val timeout = if (chunkIndex < 10) 60000L else 30000L // 60s for first chunks, 30s for others
+        
         while (!isChunkComplete(chunkIndex)) {
+            if (System.currentTimeMillis() - startTime > timeout) {
+                Log.w(TAG, "Timeout waiting for chunk $chunkIndex")
+                return null
+            }
             delay(100)
         }
         
@@ -144,10 +165,11 @@ class ChunkedStreamingManager(
     }
     
     /**
-     * Start downloading priority chunks (first 2-3 for quick start)
+     * Start downloading priority chunks (first 5 for quick start) in parallel
      */
     private fun startPriorityDownloads() {
-        val priorityChunks = minOf(3, chunkFileIds.size)
+        val priorityChunks = minOf(5, chunkFileIds.size)
+        Log.d(TAG, "Starting $priorityChunks priority chunk downloads in parallel")
         for (i in 0 until priorityChunks) {
             startChunkDownload(i)
         }
@@ -163,6 +185,9 @@ class ChunkedStreamingManager(
         val job = scope.launch {
             try {
                 downloadChunk(chunkIndex)
+            } catch (e: CancellationException) {
+                Log.d(TAG, "Chunk $chunkIndex download cancelled")
+                throw e // Re-throw to properly cancel
             } catch (e: Exception) {
                 Log.e(TAG, "Error downloading chunk $chunkIndex", e)
             }
@@ -240,6 +265,9 @@ class ChunkedStreamingManager(
                 } else {
                     throw Exception("Download returned null for chunk $chunkIndex")
                 }
+            } catch (e: CancellationException) {
+                Log.d(TAG, "Chunk $chunkIndex download cancelled (attempt ${attempt + 1})")
+                throw e // Re-throw to properly cancel coroutine
             } catch (e: Exception) {
                 Log.e(TAG, "Error downloading chunk $chunkIndex (attempt ${attempt + 1})", e)
                 throw e

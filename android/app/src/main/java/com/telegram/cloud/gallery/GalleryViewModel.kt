@@ -23,6 +23,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
+import kotlinx.coroutines.Dispatchers
+import java.io.File
 import kotlin.math.max
 
 class GalleryViewModel(
@@ -469,10 +471,39 @@ class GalleryViewModel(
      * Update local path for a media item (used when file is downloaded during streaming)
      */
     fun updateLocalPath(mediaId: Long, localPath: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                galleryDao.updateLocalPath(mediaId, localPath)
-                Log.d(TAG, "Updated local path for media ID $mediaId: $localPath")
+                val media = galleryDao.getById(mediaId)
+                if (media != null) {
+                    // Extract video duration and dimensions if needed
+                    var updatedMedia = media.copy(localPath = localPath)
+                    
+                    if (media.isVideo && media.durationMs == 0L && File(localPath).exists()) {
+                        try {
+                            val retriever = android.media.MediaMetadataRetriever()
+                            retriever.setDataSource(localPath)
+                            val duration = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                            val width = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                            val height = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+                            retriever.release()
+                            
+                            updatedMedia = updatedMedia.copy(
+                                durationMs = duration,
+                                width = if (width > 0) width else media.width,
+                                height = if (height > 0) height else media.height
+                            )
+                            Log.d(TAG, "Extracted video metadata for ${media.filename}: duration=${duration}ms, size=${width}x${height}")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to extract video metadata for ${media.filename}: ${e.message}")
+                        }
+                    }
+                    
+                    galleryDao.update(updatedMedia)
+                    Log.d(TAG, "Updated local path for media ID $mediaId: $localPath")
+                } else {
+                    // Fallback if media not found
+                    galleryDao.updateLocalPath(mediaId, localPath)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error updating local path", e)
             }

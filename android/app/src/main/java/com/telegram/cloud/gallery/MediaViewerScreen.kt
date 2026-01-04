@@ -126,7 +126,8 @@ fun MediaViewerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black),
-        beyondBoundsPageCount = 1 // Preload adjacent pages
+        beyondBoundsPageCount = 1, // Preload adjacent pages
+        key = { index -> mediaList.getOrNull(index)?.id ?: index }
     ) { pageIndex ->
         val media = mediaList.getOrNull(pageIndex)
         if (media != null) {
@@ -180,11 +181,25 @@ fun MediaViewerPage(
         } else null
     }
     
+    
     val streamingManager = remember(media.id, config) {
-        if (media.isVideo && media.isChunked && config != null) {
+        Log.d(TAG, "Creating streamingManager for ${media.filename}: isVideo=${media.isVideo}, isChunked=${media.isChunked}, localPath=${media.localPath}")
+        val localFile = File(media.localPath)
+        val fileExists = localFile.exists() && localFile.length() > 0
+        Log.d(TAG, "File check: exists=$fileExists, path=${media.localPath}")
+        
+        // If file already exists locally AND is valid, we don't need streaming manager
+        if (fileExists) {
+            Log.d(TAG, "Local file exists, no streaming needed")
+             null
+        } else if (media.isVideo && media.isChunked && config != null) {
+            Log.d(TAG, "Initializing streaming manager via getStreamingManager callback")
             if (getStreamingManager != null) {
-                getStreamingManager(media, config)
+                val manager = getStreamingManager(media, config)
+                Log.d(TAG, "Got streaming manager: $manager")
+                manager
             } else {
+                Log.w(TAG, "getStreamingManager callback is null, using fallback")
                 // Fallback for previews without global manager
                 ChunkedStreamingManager(context).apply {
                     val fileId = media.telegramFileId ?: media.telegramFileUniqueId?.split(",")?.firstOrNull() ?: ""
@@ -193,7 +208,10 @@ fun MediaViewerPage(
                     initStreaming(fileId, chunkFileIds, uploaderTokens, config)
                 }
             }
-        } else null
+        } else {
+            Log.d(TAG, "No streaming: isVideo=${media.isVideo}, isChunked=${media.isChunked}, config=${config != null}")
+             null
+        }
     }
     
     // Update upload state when progress changes
@@ -236,7 +254,7 @@ fun MediaViewerPage(
     }
     
     // Check if local file exists, if not and synced, download from Telegram or stream
-    LaunchedEffect(media.id, config) { // Key by ID to ensure refresh on page change if needed
+    LaunchedEffect(media.id, media.localPath, config) { // Key by ID and Path to ensure refresh on change
         try {
             // Log memory status before loading
             MemoryManager.logMemoryStatus(context, TAG)
@@ -265,26 +283,17 @@ fun MediaViewerPage(
                             Log.w(TAG, "Critical memory - cannot start streaming")
                             downloadState = MediaDownloadState.Error("Memoria insuficiente para streaming. Libera espacio e intenta nuevamente.")
                         } else {
-                            Log.d(TAG, "Initializing chunked streaming for ${media.filename}")
+                            Log.d(TAG, "Using streaming manager for ${media.filename}")
                             useChunkedStreaming = true
-                            val fileId = media.telegramFileId ?: media.telegramFileUniqueId?.split(",")?.firstOrNull() ?: ""
-                            val chunkFileIds = media.telegramFileUniqueId ?: ""
-                            val uploaderTokens = media.telegramUploaderTokens ?: config.tokens.first()
                             
-                            streamingManager.initStreaming(fileId, chunkFileIds, uploaderTokens, config)
-                            
-                            // Start streaming using custom data source that fetches chunks on demand
+                            // Streaming manager is already initialized by ViewModel
                             val totalChunks = streamingManager.getTotalChunks()
                             val chunkSize = streamingManager.getChunkSize()
                             
-                            // Pre-download first chunk to ensure playback can start immediately
-                            Log.d(TAG, "Pre-downloading first chunk for ${media.filename}")
-                            streamingManager.getChunkStream(0) // This will trigger download
-                            
-                            // Wait a bit for first chunk to be available
-                            delay(500)
-                            
+                            // Start streaming immediately - player will buffer automatically
+                            Log.d(TAG, "Starting chunked streaming - chunkedPlayer=${chunkedPlayer != null}, totalChunks=$totalChunks")
                             if (chunkedPlayer != null) {
+                                Log.d(TAG, "Calling streamChunkedVideo...")
                                 // Use streamChunkedVideo which uses custom DataSource for progressive streaming
                                 chunkedPlayer.streamChunkedVideo(
                                     getChunkStream = { chunkIndex ->
@@ -295,6 +304,8 @@ fun MediaViewerPage(
                                     chunkSize = chunkSize
                                 )
                                 Log.d(TAG, "Started chunked streaming for ${media.filename}: $totalChunks chunks, ${chunkSize / 1024}KB each")
+                            } else {
+                                Log.e(TAG, "chunkedPlayer is NULL! Cannot start streaming.")
                             }
                             
                             downloadState = MediaDownloadState.Ready("") // Streaming, no local file yet
@@ -329,6 +340,10 @@ fun MediaViewerPage(
                 Log.w(TAG, "File not available: localPath=${media.localPath}, isSynced=${media.isSynced}")
                 downloadState = MediaDownloadState.Error("Archivo no disponible localmente y no sincronizado")
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Normal when leaving the screen, don't log as error
+            Log.d(TAG, "MediaViewer LaunchedEffect cancelled (user navigated away)")
+            throw e // Re-throw to properly cancel coroutine
         } catch (e: OutOfMemoryError) {
             Log.e(TAG, "OutOfMemoryError in MediaViewer", e)
             downloadState = MediaDownloadState.Error("Memoria insuficiente. Cierra otras aplicaciones e intenta nuevamente.")
@@ -341,8 +356,12 @@ fun MediaViewerPage(
     }
     
     // Monitor when all chunks are downloaded and save the complete file
-    LaunchedEffect(streamingManager, useChunkedStreaming) {
-        if (useChunkedStreaming && streamingManager != null) {
+    LaunchedEffect(media.id, streamingManager) {
+        if (streamingManager != null) {
+            // Wait a bit for useChunkedStreaming to be set
+            delay(100)
+            if (!useChunkedStreaming) return@LaunchedEffect
+            
             try {
                 // Monitor chunk completion
                 while (true) {
@@ -372,6 +391,10 @@ fun MediaViewerPage(
                         break // All chunks processed
                     }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Normal when leaving the screen, don't log as error
+                Log.d(TAG, "Chunk monitoring cancelled (user navigated away)")
+                throw e // Re-throw to properly cancel coroutine
             } catch (e: Exception) {
                 Log.e(TAG, "Error monitoring chunk completion", e)
                 downloadState = MediaDownloadState.Error(ErrorRecoveryManager.getUserFriendlyErrorMessage(e))
