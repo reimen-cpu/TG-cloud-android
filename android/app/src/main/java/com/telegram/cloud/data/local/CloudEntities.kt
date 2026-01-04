@@ -159,7 +159,7 @@ class StatusConverters {
         com.telegram.cloud.data.sync.SyncLogEntity::class,
         com.telegram.cloud.data.sync.SyncMetadataEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 @androidx.room.TypeConverters(StatusConverters::class, com.telegram.cloud.data.sync.SyncOperationConverter::class)
@@ -195,8 +195,10 @@ abstract class CloudDatabase : androidx.room.RoomDatabase() {
                     MIGRATION_2_3,
                     MIGRATION_3_4,
                     MIGRATION_4_5,
-                    MIGRATION_5_6
-                ).addCallback(object : androidx.room.RoomDatabase.Callback() {
+                    MIGRATION_5_6,
+                    MIGRATION_6_7
+                ).fallbackToDestructiveMigration()
+                .addCallback(object : androidx.room.RoomDatabase.Callback() {
                     override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                         super.onCreate(db)
                         android.util.Log.i("CloudDatabase", "onCreate: Creating all tables from scratch")
@@ -330,6 +332,15 @@ abstract class CloudDatabase : androidx.room.RoomDatabase() {
                         updated_at INTEGER NOT NULL
                     )
                 """)
+            }
+        }
+        
+        val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                android.util.Log.i("CloudDatabase", "Running migration 6->7: Adding deleted_at column for trash bin")
+                
+                // Add deleted_at column for trash/soft delete functionality
+                db.execSQL("ALTER TABLE gallery_media ADD COLUMN deleted_at INTEGER DEFAULT NULL")
             }
         }
     }

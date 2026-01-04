@@ -15,9 +15,28 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.runtime.rememberCoroutineScope
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
+import coil.request.CachePolicy
+import com.telegram.cloud.utils.MemoryManager
+import com.telegram.cloud.utils.ErrorRecoveryManager
+import android.util.Log
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
@@ -68,10 +87,94 @@ fun AdvancedZoomableImage(
     }
     
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        
+        // Track retry attempts
+        var retryTrigger by remember { mutableStateOf(0) }
+        var errorMessage by remember { mutableStateOf<String?>(null) }
+        
+        // Calculate optimal size based on memory
+        val optimalSize = remember(containerSize, retryTrigger) {
+            if (containerSize != null) {
+                // Get image dimensions if available
+                val file = File(imagePath)
+                if (file.exists()) {
+                    try {
+                        val options = android.graphics.BitmapFactory.Options().apply {
+                            inJustDecodeBounds = true
+                        }
+                        android.graphics.BitmapFactory.decodeFile(imagePath, options)
+                        
+                        if (options.outWidth > 0 && options.outHeight > 0) {
+                            MemoryManager.calculateOptimalImageSize(
+                                context,
+                                androidx.compose.ui.unit.IntSize(
+                                    containerSize!!.width.toInt(),
+                                    containerSize!!.height.toInt()
+                                ),
+                                options.outWidth,
+                                options.outHeight
+                            )
+                        } else null
+                    } catch (e: Exception) {
+                        Log.e("ZoomableImage", "Error reading image dimensions", e)
+                        null
+                    }
+                } else null
+            } else null
+        }
+        
         AsyncImage(
             model = ImageRequest.Builder(context)
                 .data(File(imagePath))
-                .crossfade(true)
+                .apply {
+                    // Apply optimal size if calculated
+                    if (optimalSize != null) {
+                        size(optimalSize.width, optimalSize.height)
+                        Log.d("ZoomableImage", "Loading image with size: ${optimalSize.width}x${optimalSize.height}")
+                    }
+                    
+                    // Determine if hardware bitmap should be used
+                    val useHardware = if (optimalSize != null) {
+                        MemoryManager.shouldUseHardwareBitmap(
+                            context,
+                            optimalSize.width,
+                            optimalSize.height
+                        )
+                    } else {
+                        false // Default to software bitmap if size unknown
+                    }
+                    
+                    allowHardware(useHardware)
+                    
+                    // Enable crossfade for smooth loading
+                    crossfade(true)
+                    
+                    // Add error placeholder
+                    error(android.R.drawable.ic_menu_report_image)
+                    
+                    // Memory cache policy
+                    memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                }
+                .listener(
+                    onError = { request, result ->
+                        Log.e("ZoomableImage", "Image load error: ${result.throwable.message}", result.throwable)
+                        errorMessage = ErrorRecoveryManager.getUserFriendlyErrorMessage(result.throwable)
+                        
+                        // Handle memory-related errors
+                        if (ErrorRecoveryManager.isMemoryRelatedError(result.throwable)) {
+                            // Request GC and retry
+                            MemoryManager.requestGCIfNeeded(context)
+                            // Retry after a delay by incrementing trigger
+                            retryTrigger++
+                        }
+                    },
+                    onSuccess = { _, _ ->
+                        errorMessage = null
+                        Log.d("ZoomableImage", "Image loaded successfully")
+                    }
+                )
                 .build(),
             contentDescription = contentDescription,
             onState = { state ->
@@ -254,6 +357,42 @@ fun AdvancedZoomableImage(
                 color = Color(0xFF3390EC),
                 modifier = Modifier.size(48.dp)
             )
+        }
+        
+        // Show error message and retry button if loading failed
+        if (imageLoadState is AsyncImagePainter.State.Error && errorMessage != null) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(16.dp)
+            ) {
+                androidx.compose.material3.Icon(
+                    imageVector = androidx.compose.material.icons.Icons.Default.ErrorOutline,
+                    contentDescription = null,
+                    tint = Color(0xFFEF5350),
+                    modifier = Modifier.size(48.dp)
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(16.dp))
+                androidx.compose.material3.Text(
+                    text = errorMessage!!,
+                    color = Color.White,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    fontSize = 14.sp
+                )
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(16.dp))
+                androidx.compose.material3.Button(
+                    onClick = { retryTrigger++ },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF3390EC)
+                    )
+                ) {
+                    androidx.compose.material3.Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Default.Refresh,
+                        contentDescription = null
+                    )
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.width(8.dp))
+                    androidx.compose.material3.Text("Reintentar")
+                }
+            }
         }
     }
 }

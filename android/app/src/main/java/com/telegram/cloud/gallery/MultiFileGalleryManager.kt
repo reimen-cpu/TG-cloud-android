@@ -28,7 +28,7 @@ class MultiFileGalleryManager(
     )
 
     /**
-     * Delete multiple media files
+     * Delete multiple media files permanently
      */
     suspend fun deleteMultiple(
         mediaList: List<GalleryMediaEntity>,
@@ -36,7 +36,7 @@ class MultiFileGalleryManager(
         config: BotConfig?,
         onProgress: ((Int, Int) -> Unit)? = null
     ): MultiOperationResult = withContext(Dispatchers.IO) {
-        Log.i(TAG, "Starting batch delete for ${mediaList.size} items")
+        Log.i(TAG, "Starting batch permanent delete for ${mediaList.size} items")
         
         var successful = 0
         var failed = 0
@@ -46,7 +46,7 @@ class MultiFileGalleryManager(
             onProgress?.invoke(index + 1, mediaList.size)
             
             try {
-                galleryViewModel.deleteMedia(media, deleteFromTelegram, config)
+                galleryViewModel.deletePermanently(media, deleteFromTelegram, config)
                 successful++
             } catch (e: Exception) {
                 failed++
@@ -57,6 +57,24 @@ class MultiFileGalleryManager(
         
         Log.i(TAG, "Batch delete completed: $successful successful, $failed failed")
         MultiOperationResult(successful, failed, errors)
+    }
+
+    /**
+     * Move multiple media files to trash
+     */
+    suspend fun moveToTrashMultiple(
+        mediaList: List<GalleryMediaEntity>,
+        onProgress: ((Int, Int) -> Unit)? = null
+    ): MultiOperationResult = withContext(Dispatchers.IO) {
+        Log.i(TAG, "Starting batch move to trash for ${mediaList.size} items")
+        
+        try {
+            galleryViewModel.moveToTrash(mediaList)
+            MultiOperationResult(mediaList.size, 0, emptyList())
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to move batch to trash", e)
+            MultiOperationResult(0, mediaList.size, listOf(e.message ?: "Unknown error"))
+        }
     }
 
     /**

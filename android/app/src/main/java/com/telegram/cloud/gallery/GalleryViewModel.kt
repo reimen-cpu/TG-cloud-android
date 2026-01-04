@@ -159,6 +159,13 @@ class GalleryViewModel(
     val totalCount: StateFlow<Int> = _mediaList.map { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
+    // Trash State
+    val trashItems: StateFlow<List<GalleryMediaEntity>> = galleryDao.observeTrash()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        
+    val trashCount: StateFlow<Int> = galleryDao.getTrashCount()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
     fun updateFilter(update: FilterState.() -> FilterState) {
         _filterState.value = _filterState.value.update()
     }
@@ -354,12 +361,48 @@ class GalleryViewModel(
     }
     
     /**
-     * Delete a media file
-     * When deleted from Cloud Gallery, it ALWAYS deletes from Telegram too (if synced)
-     * Thumbnails are ONLY deleted when user deletes via Cloud Gallery
+     * Move media to trash (Soft delete)
+     */
+    fun moveToTrash(media: GalleryMediaEntity) {
+        moveToTrash(listOf(media))
+    }
+    
+    fun moveToTrash(mediaList: List<GalleryMediaEntity>) {
+        viewModelScope.launch {
+            try {
+                val ids = mediaList.map { it.id }
+                galleryDao.moveToTrash(ids)
+                Log.d(TAG, "Moved ${ids.size} items to trash")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error moving to trash", e)
+            }
+        }
+    }
+    
+    /**
+     * Restore media from trash
+     */
+    fun restoreFromTrash(media: GalleryMediaEntity) {
+        restoreFromTrash(listOf(media))
+    }
+    
+    fun restoreFromTrash(mediaList: List<GalleryMediaEntity>) {
+        viewModelScope.launch {
+            try {
+                val ids = mediaList.map { it.id }
+                galleryDao.restoreFromTrash(ids)
+                Log.d(TAG, "Restored ${ids.size} items from trash")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error restoring from trash", e)
+            }
+        }
+    }
+    
+    /**
+     * Delete permanently from device and optionally from Telegram
      */
     @Suppress("UNUSED_PARAMETER")
-    fun deleteMedia(media: GalleryMediaEntity, deleteFromTelegram: Boolean, config: BotConfig?) {
+    fun deletePermanently(media: GalleryMediaEntity, deleteFromTelegram: Boolean, config: BotConfig?) {
         viewModelScope.launch {
             try {
                 // Delete local file
@@ -379,7 +422,7 @@ class GalleryViewModel(
                 }
                 
                 // Delete from Telegram - ALWAYS when synced (user chose to delete from gallery)
-                if (media.isSynced && media.telegramMessageId != null && config != null) {
+                if (deleteFromTelegram && media.isSynced && media.telegramMessageId != null && config != null) {
                     val deleted = syncManager.deleteFromTelegram(media, config)
                     if (deleted) {
                         Log.d(TAG, "Deleted from Telegram: ${media.filename}")
@@ -395,6 +438,18 @@ class GalleryViewModel(
                 Log.d(TAG, "Deleted from gallery: ${media.filename}")
             } catch (e: Exception) {
                 Log.e(TAG, "Error deleting media", e)
+            }
+        }
+    }
+    
+    /**
+     * Empty trash (Delete all items in trash permanently)
+     */
+    fun emptyTrash(config: BotConfig?) {
+        viewModelScope.launch {
+            val trashItems = galleryDao.observeTrash().first()
+            trashItems.forEach { media ->
+                deletePermanently(media, deleteFromTelegram = media.isSynced, config = config)
             }
         }
     }

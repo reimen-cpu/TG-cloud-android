@@ -27,35 +27,55 @@ data class GalleryMediaEntity(
     @ColumnInfo(name = "telegram_file_unique_id") val telegramFileUniqueId: String? = null, // For chunked: comma-separated file_ids
     @ColumnInfo(name = "telegram_uploader_tokens") val telegramUploaderTokens: String? = null, // Token(s) used for upload
     @ColumnInfo(name = "sync_error") val syncError: String? = null,
-    @ColumnInfo(name = "last_sync_attempt") val lastSyncAttempt: Long = 0
+    @ColumnInfo(name = "last_sync_attempt") val lastSyncAttempt: Long = 0,
+    
+    // Trash / Soft Delete
+    @ColumnInfo(name = "deleted_at") val deletedAt: Long? = null
 ) {
     val isVideo: Boolean get() = mimeType.startsWith("video/")
     val isImage: Boolean get() = mimeType.startsWith("image/")
     val isChunked: Boolean get() = telegramFileUniqueId?.contains(",") == true
+    val isDeleted: Boolean get() = deletedAt != null
 }
 
 @Dao
 interface GalleryMediaDao {
-    @Query("SELECT * FROM gallery_media ORDER BY date_taken DESC")
+    @Query("SELECT * FROM gallery_media WHERE deleted_at IS NULL ORDER BY date_taken DESC")
     suspend fun getAll(): List<GalleryMediaEntity>
     
     // Observable Flow for real-time updates
-    @Query("SELECT * FROM gallery_media ORDER BY date_taken DESC")
+    @Query("SELECT * FROM gallery_media WHERE deleted_at IS NULL ORDER BY date_taken DESC")
     fun observeAll(): Flow<List<GalleryMediaEntity>>
 
-    @Query("SELECT * FROM gallery_media ORDER BY date_taken DESC LIMIT :pageSize OFFSET :offset")
+    @Query("SELECT * FROM gallery_media WHERE deleted_at IS NULL ORDER BY date_taken DESC LIMIT :pageSize OFFSET :offset")
     fun observePaged(pageSize: Int, offset: Int): Flow<List<GalleryMediaEntity>>
     
-    @Query("SELECT * FROM gallery_media ORDER BY date_taken DESC LIMIT :pageSize OFFSET :offset")
+    @Query("SELECT * FROM gallery_media WHERE deleted_at IS NULL ORDER BY date_taken DESC LIMIT :pageSize OFFSET :offset")
     suspend fun getPaged(pageSize: Int, offset: Int): List<GalleryMediaEntity>
     
-    @Query("SELECT COUNT(*) FROM gallery_media")
+    @Query("SELECT COUNT(*) FROM gallery_media WHERE deleted_at IS NULL")
     fun getTotalCount(): Flow<Int>
     
-    @Query("SELECT * FROM gallery_media WHERE is_synced = 0 ORDER BY date_taken DESC")
+    // Trash Management
+    @Query("SELECT * FROM gallery_media WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC")
+    fun observeTrash(): Flow<List<GalleryMediaEntity>>
+    
+    @Query("SELECT COUNT(*) FROM gallery_media WHERE deleted_at IS NOT NULL")
+    fun getTrashCount(): Flow<Int>
+    
+    @Query("UPDATE gallery_media SET deleted_at = :timestamp WHERE id IN (:ids)")
+    suspend fun moveToTrash(ids: List<Long>, timestamp: Long = System.currentTimeMillis())
+    
+    @Query("UPDATE gallery_media SET deleted_at = NULL WHERE id IN (:ids)")
+    suspend fun restoreFromTrash(ids: List<Long>)
+
+    @Query("DELETE FROM gallery_media WHERE deleted_at IS NOT NULL AND deleted_at < :timestamp")
+    suspend fun deleteOldTrash(timestamp: Long)
+
+    @Query("SELECT * FROM gallery_media WHERE is_synced = 0 AND deleted_at IS NULL ORDER BY date_taken DESC")
     suspend fun getUnsynced(): List<GalleryMediaEntity>
     
-    @Query("SELECT * FROM gallery_media WHERE is_synced = 1 ORDER BY date_taken DESC")
+    @Query("SELECT * FROM gallery_media WHERE is_synced = 1 AND deleted_at IS NULL ORDER BY date_taken DESC")
     suspend fun getSynced(): List<GalleryMediaEntity>
     
     @Query("SELECT * FROM gallery_media WHERE local_path = :path LIMIT 1")
@@ -125,6 +145,9 @@ interface GalleryMediaDao {
     
     @Delete
     suspend fun delete(media: GalleryMediaEntity)
+
+    @Query("DELETE FROM gallery_media WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>)
     
     @Query("DELETE FROM gallery_media")
     suspend fun clear()
@@ -132,7 +155,7 @@ interface GalleryMediaDao {
     @Query("SELECT COUNT(*) FROM gallery_media")
     suspend fun count(): Int
     
-    @Query("SELECT COUNT(*) FROM gallery_media WHERE is_synced = 1")
+    @Query("SELECT COUNT(*) FROM gallery_media WHERE is_synced = 1 AND deleted_at IS NULL")
     suspend fun countSynced(): Int
 }
 

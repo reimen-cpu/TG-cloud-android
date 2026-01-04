@@ -1,6 +1,7 @@
 @file:OptIn(
     androidx.media3.common.util.UnstableApi::class,
-    androidx.compose.material3.ExperimentalMaterial3Api::class
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.foundation.ExperimentalFoundationApi::class
 )
 package com.telegram.cloud.gallery
 
@@ -8,14 +9,17 @@ import android.net.Uri
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -45,15 +49,17 @@ import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import java.io.File
 import com.telegram.cloud.utils.getUserVisibleDownloadsDir
+import com.telegram.cloud.utils.MemoryManager
+import com.telegram.cloud.utils.ErrorRecoveryManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -87,6 +93,61 @@ sealed class MediaUploadState {
 
 @Composable
 fun MediaViewerScreen(
+    initialMediaId: Long,
+    mediaList: List<GalleryMediaEntity>,
+    onBack: () -> Unit,
+    onSync: (GalleryMediaEntity) -> Unit,
+    onDownloadFromTelegram: (GalleryMediaEntity, (Float) -> Unit, (String) -> Unit, (String) -> Unit) -> Unit,
+    onSyncClick: ((Float) -> Unit)? = null,
+    isSyncing: Boolean = false,
+    currentSyncMediaId: Long? = null,
+    uploadProgress: Float = 0f,
+    config: com.telegram.cloud.data.prefs.BotConfig? = null,
+    onFileDownloaded: ((Long, String) -> Unit)? = null
+) {
+    if (mediaList.isEmpty()) {
+        onBack()
+        return
+    }
+
+    val initialIndex = remember(initialMediaId, mediaList) {
+        val index = mediaList.indexOfFirst { it.id == initialMediaId }
+        if (index >= 0) index else 0
+    }
+
+    val pagerState = rememberPagerState(
+        initialPage = initialIndex,
+        pageCount = { mediaList.size }
+    )
+
+    HorizontalPager(
+        state = pagerState,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        beyondBoundsPageCount = 1 // Preload adjacent pages
+    ) { pageIndex ->
+        val media = mediaList.getOrNull(pageIndex)
+        if (media != null) {
+            val isCurrentPageSyncing = isSyncing && (currentSyncMediaId == media.id)
+            
+            MediaViewerPage(
+                media = media,
+                onBack = onBack,
+                onSync = { onSync(media) },
+                onDownloadFromTelegram = onDownloadFromTelegram,
+                onSyncClick = onSyncClick,
+                isSyncing = isCurrentPageSyncing,
+                uploadProgress = if (isCurrentPageSyncing) uploadProgress else 0f,
+                config = config,
+                onFileDownloaded = { path -> onFileDownloaded?.invoke(media.id, path) }
+            )
+        }
+    }
+}
+
+@Composable
+fun MediaViewerPage(
     media: GalleryMediaEntity,
     onBack: () -> Unit,
     onSync: () -> Unit,
@@ -107,12 +168,16 @@ fun MediaViewerScreen(
     
     // Chunked streaming state
     var useChunkedStreaming by remember { mutableStateOf(false) }
-    val chunkedPlayer = remember { 
+    
+    // Remember players only for this specific media item
+    // Keying by media.id ensures we get fresh state if media changes (though in pager media is constant for this composable)
+    val chunkedPlayer = remember(media.id) { 
         if (media.isVideo && media.isChunked) {
             ChunkedVideoPlayer(context)
         } else null
     }
-    val streamingManager = remember {
+    
+    val streamingManager = remember(media.id) {
         if (media.isVideo && media.isChunked && config != null) {
             ChunkedStreamingManager(context)
         } else null
@@ -148,120 +213,145 @@ fun MediaViewerScreen(
     }
     
     // Check if local file exists, if not and synced, download from Telegram or stream
-    LaunchedEffect(media, config) {
-        Log.d(TAG, "MediaViewer opened: ${media.filename}, isVideo=${media.isVideo}, isSynced=${media.isSynced}, isChunked=${media.isChunked}")
-        val localFile = File(media.localPath)
-        if (localFile.exists()) {
-            Log.d(TAG, "Local file exists: ${media.localPath}, size=${localFile.length()}")
-            downloadState = MediaDownloadState.Ready(media.localPath)
-            useChunkedStreaming = false
-        } else if (media.isSynced) {
-            // Check if we have the necessary info to download/stream
-            val hasFileId = if (media.isChunked) {
-                // For chunked: need telegramFileUniqueId (comma-separated file IDs)
-                media.telegramFileUniqueId != null && media.telegramFileUniqueId.isNotBlank()
-            } else {
-                // For direct: need telegramFileId OR telegramMessageId (to attempt recovery)
-                media.telegramFileId != null && media.telegramFileId.isNotBlank()
-            }
+    LaunchedEffect(media.id, config) { // Key by ID to ensure refresh on page change if needed
+        try {
+            // Log memory status before loading
+            MemoryManager.logMemoryStatus(context, TAG)
             
-            if (hasFileId || media.telegramMessageId != null) {
-                // For chunked videos, use streaming instead of full download
-                if (media.isVideo && media.isChunked && config != null && streamingManager != null) {
-                    Log.d(TAG, "Initializing chunked streaming for ${media.filename}")
-                    useChunkedStreaming = true
-                    val fileId = media.telegramFileId ?: media.telegramFileUniqueId?.split(",")?.firstOrNull() ?: ""
-                    val chunkFileIds = media.telegramFileUniqueId ?: ""
-                    val uploaderTokens = media.telegramUploaderTokens ?: config.tokens.first()
-                    
-                    streamingManager.initStreaming(fileId, chunkFileIds, uploaderTokens, config)
-                    
-                    // Start streaming using custom data source that fetches chunks on demand
-                    val totalChunks = streamingManager.getTotalChunks()
-                    val chunkSize = streamingManager.getChunkSize()
-                    
-                    // Pre-download first chunk to ensure playback can start immediately
-                    Log.d(TAG, "Pre-downloading first chunk for ${media.filename}")
-                    streamingManager.getChunkStream(0) // This will trigger download
-                    
-                    // Wait a bit for first chunk to be available
-                    delay(500)
-                    
-                    if (chunkedPlayer != null) {
-                        // Use streamChunkedVideo which uses custom DataSource for progressive streaming
-                        chunkedPlayer.streamChunkedVideo(
-                            getChunkStream = { chunkIndex ->
-                                Log.d(TAG, "Requesting chunk stream: $chunkIndex")
-                                streamingManager.getChunkStream(chunkIndex)
-                            },
-                            totalChunks = totalChunks,
-                            chunkSize = chunkSize
-                        )
-                        Log.d(TAG, "Started chunked streaming for ${media.filename}: $totalChunks chunks, ${chunkSize / 1024}KB each")
-                    }
-                    
-                    downloadState = MediaDownloadState.Ready("") // Streaming, no local file yet
+            Log.d(TAG, "MediaViewer opened: ${media.filename}, isVideo=${media.isVideo}, isSynced=${media.isSynced}, isChunked=${media.isChunked}")
+            val localFile = File(media.localPath)
+            if (localFile.exists()) {
+                Log.d(TAG, "Local file exists: ${media.localPath}, size=${localFile.length()}")
+                downloadState = MediaDownloadState.Ready(media.localPath)
+                useChunkedStreaming = false
+            } else if (media.isSynced) {
+                // Check if we have the necessary info to download/stream
+                val hasFileId = if (media.isChunked) {
+                    // For chunked: need telegramFileUniqueId (comma-separated file IDs)
+                    media.telegramFileUniqueId != null && media.telegramFileUniqueId.isNotBlank()
                 } else {
-                    // Need to download from Telegram (non-chunked or non-video)
-                    Log.d(TAG, "File not local, downloading from Telegram. fileId=${media.telegramFileId}, isChunked=${media.isChunked}, telegramFileUniqueId=${media.telegramFileUniqueId?.take(50)}")
-                    downloadState = MediaDownloadState.Downloading(0f)
-                    onDownloadFromTelegram(
-                        media,
-                        { progress -> 
-                            Log.d(TAG, "Download progress: ${(progress * 100).toInt()}%")
-                            downloadState = MediaDownloadState.Downloading(progress) 
-                        },
-                        { path -> 
-                            Log.d(TAG, "Download complete: $path")
-                            downloadState = MediaDownloadState.Ready(path)
-                            // Notify that file was downloaded (to update database)
-                            onFileDownloaded?.invoke(path)
-                        },
-                        { error -> 
-                            Log.e(TAG, "Download error: $error")
-                            downloadState = MediaDownloadState.Error(error) 
+                    // For direct: need telegramFileId OR telegramMessageId (to attempt recovery)
+                    media.telegramFileId != null && media.telegramFileId.isNotBlank()
+                }
+                
+                if (hasFileId || media.telegramMessageId != null) {
+                    // For chunked videos, use streaming instead of full download
+                    if (media.isVideo && media.isChunked && config != null && streamingManager != null) {
+                        // Check memory before starting streaming
+                        if (MemoryManager.isCriticalMemory(context)) {
+                            Log.w(TAG, "Critical memory - cannot start streaming")
+                            downloadState = MediaDownloadState.Error("Memoria insuficiente para streaming. Libera espacio e intenta nuevamente.")
+                        } else {
+                            Log.d(TAG, "Initializing chunked streaming for ${media.filename}")
+                            useChunkedStreaming = true
+                            val fileId = media.telegramFileId ?: media.telegramFileUniqueId?.split(",")?.firstOrNull() ?: ""
+                            val chunkFileIds = media.telegramFileUniqueId ?: ""
+                            val uploaderTokens = media.telegramUploaderTokens ?: config.tokens.first()
+                            
+                            streamingManager.initStreaming(fileId, chunkFileIds, uploaderTokens, config)
+                            
+                            // Start streaming using custom data source that fetches chunks on demand
+                            val totalChunks = streamingManager.getTotalChunks()
+                            val chunkSize = streamingManager.getChunkSize()
+                            
+                            // Pre-download first chunk to ensure playback can start immediately
+                            Log.d(TAG, "Pre-downloading first chunk for ${media.filename}")
+                            streamingManager.getChunkStream(0) // This will trigger download
+                            
+                            // Wait a bit for first chunk to be available
+                            delay(500)
+                            
+                            if (chunkedPlayer != null) {
+                                // Use streamChunkedVideo which uses custom DataSource for progressive streaming
+                                chunkedPlayer.streamChunkedVideo(
+                                    getChunkStream = { chunkIndex ->
+                                        Log.d(TAG, "Requesting chunk stream: $chunkIndex")
+                                        streamingManager.getChunkStream(chunkIndex)
+                                    },
+                                    totalChunks = totalChunks,
+                                    chunkSize = chunkSize
+                                )
+                                Log.d(TAG, "Started chunked streaming for ${media.filename}: $totalChunks chunks, ${chunkSize / 1024}KB each")
+                            }
+                            
+                            downloadState = MediaDownloadState.Ready("") // Streaming, no local file yet
                         }
-                    )
+                    } else {
+                        // Need to download from Telegram (non-chunked or non-video)
+                        Log.d(TAG, "File not local, downloading from Telegram. fileId=${media.telegramFileId}, isChunked=${media.isChunked}, telegramFileUniqueId=${media.telegramFileUniqueId?.take(50)}")
+                        downloadState = MediaDownloadState.Downloading(0f)
+                        onDownloadFromTelegram(
+                            media,
+                            { progress -> 
+                                Log.d(TAG, "Download progress: ${(progress * 100).toInt()}%")
+                                downloadState = MediaDownloadState.Downloading(progress) 
+                            },
+                            { path -> 
+                                Log.d(TAG, "Download complete: $path")
+                                downloadState = MediaDownloadState.Ready(path)
+                                // Notify that file was downloaded (to update database)
+                                onFileDownloaded?.invoke(path)
+                            },
+                            { error -> 
+                                Log.e(TAG, "Download error: $error")
+                                downloadState = MediaDownloadState.Error(error) 
+                            }
+                        )
+                    }
+                } else {
+                    Log.w(TAG, "File synced but missing fileId/messageId: localPath=${media.localPath}, isSynced=${media.isSynced}, fileId=${media.telegramFileId}, messageId=${media.telegramMessageId}")
+                    downloadState = MediaDownloadState.Error("Archivo sincronizado pero falta información de descarga. Por favor vuelve a sincronizar este archivo.")
                 }
             } else {
-                Log.w(TAG, "File synced but missing fileId/messageId: localPath=${media.localPath}, isSynced=${media.isSynced}, fileId=${media.telegramFileId}, messageId=${media.telegramMessageId}")
-                downloadState = MediaDownloadState.Error("File synced but download info missing. Please re-sync this file.")
+                Log.w(TAG, "File not available: localPath=${media.localPath}, isSynced=${media.isSynced}")
+                downloadState = MediaDownloadState.Error("Archivo no disponible localmente y no sincronizado")
             }
-        } else {
-            Log.w(TAG, "File not available: localPath=${media.localPath}, isSynced=${media.isSynced}")
-            downloadState = MediaDownloadState.Error("File not available locally and not synced")
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "OutOfMemoryError in MediaViewer", e)
+            downloadState = MediaDownloadState.Error("Memoria insuficiente. Cierra otras aplicaciones e intenta nuevamente.")
+            MemoryManager.requestGCIfNeeded(context)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in MediaViewer LaunchedEffect", e)
+            val errorMsg = ErrorRecoveryManager.getUserFriendlyErrorMessage(e)
+            downloadState = MediaDownloadState.Error(errorMsg)
         }
     }
     
     // Monitor when all chunks are downloaded and save the complete file
     LaunchedEffect(streamingManager, useChunkedStreaming) {
         if (useChunkedStreaming && streamingManager != null) {
-            // Monitor chunk completion
-            while (true) {
-                delay(1000) // Check every second
-                if (streamingManager.areAllChunksComplete()) {
-                    Log.d(TAG, "All chunks downloaded for ${media.filename}, assembling file...")
-                    
-                    // Save to user-visible Telegram Cloud downloads directory
-                    val downloadsDir = getUserVisibleDownloadsDir(context)
-                    val outputFile = File(downloadsDir, media.filename)
-                    
-                    // Reassemble chunks into complete file
-                    val success = streamingManager.reassembleFile(outputFile)
-                    
-                    if (success) {
-                        Log.d(TAG, "File saved to Downloads: ${outputFile.absolutePath}")
-                        // Update download state
-                        downloadState = MediaDownloadState.Ready(outputFile.absolutePath)
+            try {
+                // Monitor chunk completion
+                while (true) {
+                    delay(1000) // Check every second
+                    if (streamingManager.areAllChunksComplete()) {
+                        Log.d(TAG, "All chunks downloaded for ${media.filename}, assembling file...")
                         
-                        // Notify that file was downloaded (to update database)
-                        onFileDownloaded?.invoke(outputFile.absolutePath)
-                    } else {
-                        Log.e(TAG, "Failed to reassemble file for ${media.filename}")
+                        // Save to user-visible Telegram Cloud downloads directory
+                        val downloadsDir = getUserVisibleDownloadsDir(context)
+                        val outputFile = File(downloadsDir, media.filename)
+                        
+                        // Reassemble chunks into complete file
+                        val success = streamingManager.reassembleFile(outputFile)
+                        
+                        if (success) {
+                            Log.d(TAG, "File saved to Downloads: ${outputFile.absolutePath}")
+                            // Update download state
+                            downloadState = MediaDownloadState.Ready(outputFile.absolutePath)
+                            
+                            // Notify that file was downloaded (to update database)
+                            onFileDownloaded?.invoke(outputFile.absolutePath)
+                        } else {
+                            Log.e(TAG, "Failed to reassemble file for ${media.filename}")
+                            downloadState = MediaDownloadState.Error("Error al ensamblar el archivo")
+                        }
+                        
+                        break // All chunks processed
                     }
-                    
-                    break // All chunks processed
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error monitoring chunk completion", e)
+                downloadState = MediaDownloadState.Error(ErrorRecoveryManager.getUserFriendlyErrorMessage(e))
             }
         }
     }
@@ -629,14 +719,6 @@ private fun VideoPlayer(
 ) {
     val context = LocalContext.current
     
-    // Create ExoPlayer instance
-    val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
-            playWhenReady = false
-            repeatMode = Player.REPEAT_MODE_OFF
-        }
-    }
-    
     // Player state
     var isPlaying by remember { mutableStateOf(false) }
     var playbackState by remember { mutableStateOf(Player.STATE_IDLE) }
@@ -645,6 +727,28 @@ private fun VideoPlayer(
     var bufferedPosition by remember { mutableStateOf(0L) }
     var controlsVisible by remember { mutableStateOf(true) }
     var lastInteractionTime by remember { mutableStateOf(System.currentTimeMillis()) }
+    var playerError by remember { mutableStateOf<String?>(null) }
+    
+    // Create ExoPlayer instance with optimized configuration
+    val exoPlayer = remember {
+        // Configure LoadControl for memory-efficient buffering
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                15_000,  // Min buffer: 15 seconds
+                30_000,  // Max buffer: 30 seconds  
+                2_500,   // Playback buffer: 2.5 seconds
+                5_000    // Playback after rebuffer: 5 seconds
+            )
+            .build()
+        
+        ExoPlayer.Builder(context)
+            .setLoadControl(loadControl)
+            .build()
+            .apply {
+                playWhenReady = false
+                repeatMode = Player.REPEAT_MODE_OFF
+            }
+    }
     
     // Set media source
     LaunchedEffect(videoPath) {
@@ -677,6 +781,19 @@ private fun VideoPlayer(
             override fun onIsPlayingChanged(playing: Boolean) {
                 Log.d(TAG, "VideoPlayer: IsPlaying changed to $playing")
                 isPlaying = playing
+            }
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                Log.e(TAG, "VideoPlayer: Player error", error)
+                playerError = when (error.errorCode) {
+                    androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+                    androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+                    androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
+                        "Error de red. Verifica tu conexión."
+                    androidx.media3.common.PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+                    androidx.media3.common.PlaybackException.ERROR_CODE_DECODING_FAILED ->
+                        "Error al decodificar el video. El formato puede no ser compatible."
+                    else -> "Error al reproducir el video: ${error.message ?: "Error desconocido"}"
+                }
             }
         }
         exoPlayer.addListener(listener)
@@ -743,153 +860,138 @@ private fun VideoPlayer(
             CircularProgressIndicator(
                 color = Color(0xFF3390EC),
                 modifier = Modifier
-                    .size(48.dp)
                     .align(Alignment.Center)
+                    .size(48.dp)
             )
         }
         
-        // Controls overlay
-        if (controlsVisible || playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Center play/pause button
-                IconButton(
-                    onClick = {
-                        if (playbackState == Player.STATE_ENDED) {
-                            exoPlayer.seekTo(0)
-                            exoPlayer.play()
-                        } else if (isPlaying) {
-                            exoPlayer.pause()
-                        } else {
-                            exoPlayer.play()
-                        }
+        // Error message
+        playerError?.let { error ->
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    Icons.Default.ErrorOutline,
+                    contentDescription = null,
+                    tint = Color(0xFFEF5350),
+                    modifier = Modifier.size(32.dp)
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    error,
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = { 
+                        playerError = null
+                        exoPlayer.prepare()
+                        exoPlayer.play()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3390EC))
+                ) {
+                    Text("Reintentar")
+                }
+            }
+        }
+        
+        // Play/Pause button (center)
+        if (controlsVisible && !isPlaying && playbackState != Player.STATE_BUFFERING && playerError == null) {
+            IconButton(
+                onClick = { exoPlayer.play() },
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(64.dp)
+                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+            ) {
+                Icon(
+                    Icons.Default.PlayArrow,
+                    contentDescription = "Play",
+                    tint = Color.White,
+                    modifier = Modifier.size(48.dp)
+                )
+            }
+        }
+        
+        // Custom Controls (bottom)
+        if (controlsVisible && playerError == null) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.7f))
+                    .padding(8.dp)
+            ) {
+                // Seek bar
+                Slider(
+                    value = if (duration > 0) currentPosition.toFloat() / duration else 0f,
+                    onValueChange = { value ->
+                        val newPosition = (value * duration).toLong()
+                        exoPlayer.seekTo(newPosition)
+                        currentPosition = newPosition
                         lastInteractionTime = System.currentTimeMillis()
                     },
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .size(72.dp)
-                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
-                ) {
-                    Icon(
-                        when {
-                            playbackState == Player.STATE_ENDED -> Icons.Default.Replay
-                            isPlaying -> Icons.Default.Pause
-                            else -> Icons.Default.PlayArrow
-                        },
-                        contentDescription = if (isPlaying) "Pause" else "Play",
-                        tint = Color.White,
-                        modifier = Modifier.size(48.dp)
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color(0xFF3390EC),
+                        activeTrackColor = Color(0xFF3390EC),
+                        inactiveTrackColor = Color.White.copy(alpha = 0.3f)
                     )
-                }
+                )
                 
-                // Bottom controls with seek bar
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                        .background(Color.Black.copy(alpha = 0.5f))
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Progress bar
-                    VideoSeekBar(
-                        currentPosition = currentPosition,
-                        bufferedPosition = bufferedPosition,
-                        duration = duration,
-                        onSeek = { position ->
-                            exoPlayer.seekTo(position)
-                            lastInteractionTime = System.currentTimeMillis()
-                        }
+                    Text(
+                        formatDuration(currentPosition),
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(start = 8.dp)
                     )
                     
-                    // Time display
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = formatDuration(currentPosition),
-                            color = Color.White,
-                            fontSize = 12.sp
-                        )
-                        Text(
-                            text = formatDuration(duration),
-                            color = Color.White,
-                            fontSize = 12.sp
-                        )
+                    Row {
+                        IconButton(onClick = { 
+                            if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                            lastInteractionTime = System.currentTimeMillis()
+                        }) {
+                            Icon(
+                                if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (isPlaying) "Pause" else "Play",
+                                tint = Color.White
+                            )
+                        }
                     }
+                    
+                    Text(
+                        formatDuration(duration),
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
                 }
             }
         }
     }
 }
 
-/**
- * Seek bar for video playback
- */
-@Composable
-private fun VideoSeekBar(
-    currentPosition: Long,
-    bufferedPosition: Long,
-    duration: Long,
-    onSeek: (Long) -> Unit
-) {
-    val progress = if (duration > 0) currentPosition.toFloat() / duration else 0f
-    val bufferedProgress = if (duration > 0) bufferedPosition.toFloat() / duration else 0f
-    
-    var isDragging by remember { mutableStateOf(false) }
-    var dragPosition by remember { mutableStateOf(0f) }
-    
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(32.dp),
-        contentAlignment = Alignment.CenterStart
-    ) {
-        // Background track
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(Color.White.copy(alpha = 0.3f))
-        )
-        
-        // Buffered progress
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(bufferedProgress)
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(Color.White.copy(alpha = 0.5f))
-        )
-        
-        // Current progress
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(if (isDragging) dragPosition else progress)
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(Color(0xFF3390EC))
-        )
-        
-        // Slider for seeking
-        Slider(
-            value = if (isDragging) dragPosition else progress,
-            onValueChange = { value ->
-                isDragging = true
-                dragPosition = value
-            },
-            onValueChangeFinished = {
-                isDragging = false
-                onSeek((dragPosition * duration).toLong())
-            },
-            modifier = Modifier.fillMaxWidth(),
-            colors = SliderDefaults.colors(
-                thumbColor = Color.White,
-                activeTrackColor = Color.Transparent,
-                inactiveTrackColor = Color.Transparent
-            )
-        )
-    }
+
+
+// Helper functions removed - using standard androidx.compose.foundation.gestures.transformable and rememberTransformableState
+// Make sure to add: import androidx.compose.foundation.gestures.rememberTransformableState
+// Make sure to add: import androidx.compose.foundation.gestures.transformable
+
+private fun formatDuration(millis: Long): String {
+    val totalSeconds = millis / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return String.format("%02d:%02d", minutes, seconds)
 }
 
 private fun formatFileSize(bytes: Long): String {
@@ -898,17 +1000,5 @@ private fun formatFileSize(bytes: Long): String {
         bytes >= 1_000_000 -> String.format("%.2f MB", bytes / 1_000_000.0)
         bytes >= 1_000 -> String.format("%.2f KB", bytes / 1_000.0)
         else -> "$bytes B"
-    }
-}
-
-private fun formatDuration(ms: Long): String {
-    val seconds = (ms / 1000) % 60
-    val minutes = (ms / 1000 / 60) % 60
-    val hours = ms / 1000 / 60 / 60
-    
-    return if (hours > 0) {
-        String.format("%d:%02d:%02d", hours, minutes, seconds)
-    } else {
-        String.format("%d:%02d", minutes, seconds)
     }
 }

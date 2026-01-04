@@ -54,6 +54,7 @@ import com.google.accompanist.swiperefresh.rememberSwipeRefreshState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
+import com.telegram.cloud.gallery.components.MediaThumbnail
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -116,7 +117,8 @@ fun CloudGalleryScreen(
     onSelectedSync: ((List<GalleryMediaEntity>) -> Unit)? = null,
     onSelectedDelete: ((List<GalleryMediaEntity>) -> Unit)? = null,
     onSelectedShare: ((List<GalleryMediaEntity>) -> Unit)? = null,
-    onSelectedDownload: ((List<GalleryMediaEntity>) -> Unit)? = null
+    onSelectedDownload: ((List<GalleryMediaEntity>) -> Unit)? = null,
+    onOpenTrash: () -> Unit = {}
 ) {
     val materialTheme = MaterialTheme.colorScheme
     
@@ -131,6 +133,7 @@ fun CloudGalleryScreen(
     
     // Search and filter state - now in filterState
     var showSortMenu by remember { mutableStateOf(false) }
+    var showMoreMenu by remember { mutableStateOf(false) }
     
     // Display mode state
     var displayMode by rememberSaveable(stateSaver = MediaDisplayModeSaver) { mutableStateOf(MediaDisplayMode.GRID_3) }
@@ -404,19 +407,52 @@ fun CloudGalleryScreen(
                             tint = materialTheme.primary
                         )
                     }
-                    IconButton(onClick = onSyncAll) {
-                        Icon(
-                            Icons.Default.CloudUpload,
-                            contentDescription = stringResource(R.string.sync_all),
-                            tint = materialTheme.primary
-                        )
-                    }
-                    IconButton(onClick = onRestoreAll) {
-                        Icon(
-                            Icons.Default.CloudDownload,
-                            contentDescription = stringResource(R.string.restore_all),
-                            tint = materialTheme.primary
-                        )
+                    
+                    // More menu
+                    Box {
+                        IconButton(onClick = { showMoreMenu = true }) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = "More options",
+                                tint = materialTheme.onSurfaceVariant
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showMoreMenu,
+                            onDismissRequest = { showMoreMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Trash Bin") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onOpenTrash()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Delete, contentDescription = null)
+                                }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.sync_all)) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onSyncAll()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.CloudUpload, contentDescription = null)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.restore_all)) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onRestoreAll()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.CloudDownload, contentDescription = null)
+                                }
+                            )
+                        }
                     }
                 }
             },
@@ -1200,170 +1236,7 @@ private fun SyncProgressBar(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun MediaThumbnail(
-    media: GalleryMediaEntity,
-    isSelected: Boolean = false,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit
-) {
-    val context = LocalContext.current
-    val materialTheme = MaterialTheme.colorScheme
-    
-    // Check if local file exists
-    val localFileExists = remember(media.localPath) {
-        File(media.localPath).exists()
-    }
-    
-    Box(
-        modifier = Modifier
-            .aspectRatio(1f)
-            .clip(MaterialTheme.shapes.small)
-            .shadow(2.dp, shape = MaterialTheme.shapes.small)
-            .border(
-                width = if (isSelected) 3.dp else 0.dp,
-                color = materialTheme.primary,
-                shape = MaterialTheme.shapes.small
-            )
-            .background(
-                if (isSelected) materialTheme.primaryContainer.copy(alpha = 0.2f) else materialTheme.surfaceVariant
-            )
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
-            )
-    ) {
-        // Thumbnail image - always use thumbnail if available (thumbnails are stored locally forever)
-        // Fall back to local path only if thumbnail doesn't exist
-        val thumbnailFile = media.thumbnailPath?.let { File(it) }
-        val localFile = File(media.localPath)
-        
-        val imageSource = when {
-            thumbnailFile?.exists() == true -> thumbnailFile
-            localFile.exists() -> localFile
-            else -> null // No image available
-        }
-        
-        if (imageSource != null) {
-            AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(imageSource)
-                    .crossfade(true)
-                    // For videos without thumbnail, extract first frame
-                    .apply {
-                        if (media.isVideo && thumbnailFile?.exists() != true) {
-                            decoderFactory { result, options, _ ->
-                                VideoFrameDecoder(result.source, options)
-                            }
-                            videoFrameMillis(1000) // Get frame at 1 second
-                        }
-                    }
-                    .build(),
-                contentDescription = media.filename,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                error = painterResource(id = R.drawable.ic_launcher_foreground),
-                fallback = painterResource(id = R.drawable.ic_launcher_foreground)
-            )
-        } else {
-            // Placeholder when no thumbnail or local file exists
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    if (media.isVideo) Icons.Default.Videocam else Icons.Default.Image,
-                    contentDescription = null,
-                    tint = materialTheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-        }
-        
-        // Overlay for missing local file (but synced)
-        if (!localFileExists && media.isSynced) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.3f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.CloudDownload,
-                    contentDescription = stringResource(R.string.download_from_cloud),
-                    tint = Color.White.copy(alpha = 0.8f),
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-        }
-        
-        // Selection indicator
-        if (isSelected) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(6.dp)
-                    .size(24.dp)
-                    .background(
-                        materialTheme.primary,
-                        CircleShape
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.Check,
-                    contentDescription = stringResource(R.string.selected),
-                    tint = materialTheme.onPrimary,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
-        
-        // Video duration badge
-        if (media.isVideo && media.durationMs > 0) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(6.dp)
-                    .background(
-                        Color.Black.copy(alpha = 0.75f),
-                        MaterialTheme.shapes.small
-                    )
-                    .padding(horizontal = 5.dp, vertical = 3.dp)
-            ) {
-                Text(
-                    text = formatDuration(media.durationMs),
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-        
-        // Sync status indicator
-        if (!isSelected) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(6.dp)
-                    .size(20.dp)
-                    .background(
-                        if (media.isSynced) materialTheme.primary else materialTheme.error,
-                        CircleShape
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    if (media.isSynced) Icons.Default.Cloud else Icons.Default.CloudOff,
-                    contentDescription = if (media.isSynced) stringResource(R.string.synced) else stringResource(R.string.not_synced),
-                    tint = Color.White,
-                    modifier = Modifier.size(12.dp)
-                )
-            }
-        }
-    }
-}
+// MediaThumbnail is now imported from com.telegram.cloud.gallery.components.MediaThumbnail
 
 @Composable
 private fun EmptyGalleryState(onScanMedia: () -> Unit) {

@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import com.telegram.cloud.data.prefs.BotConfig
 import com.telegram.cloud.data.remote.TelegramBotClient
+import com.telegram.cloud.utils.MemoryManager
+import com.telegram.cloud.utils.ErrorRecoveryManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,6 +43,11 @@ class ChunkedStreamingManager(
     private var chunkFileIds: List<String> = emptyList()
     private var uploaderTokens: List<String> = emptyList()
     
+    // Buffer management - limit chunks in memory to prevent OOM
+    private val cachedChunks = mutableSetOf<Int>() // Track which chunks are cached
+    private val chunkAccessOrder = mutableListOf<Int>() // LRU tracking
+    private var maxCachedChunks: Int = 5 // Default, will be adjusted based on memory
+    
     /**
      * Initialize streaming for a chunked file
      * 
@@ -59,12 +66,20 @@ class ChunkedStreamingManager(
         this.chunkFileIds = chunkFileIds.split(",").map { it.trim() }
         this.uploaderTokens = uploaderTokens.split(",").map { it.trim() }
         
+        // Configure buffer size based on available memory
+        maxCachedChunks = MemoryManager.getRecommendedChunkBufferSize(context)
+        
         // Create streaming directory
         streamingDir = File(context.cacheDir, "streaming/$fileId").apply {
             mkdirs()
         }
         
-        Log.d(TAG, "Initialized streaming: ${this.chunkFileIds.size} chunks")
+        Log.d(TAG, "Initialized streaming: ${this.chunkFileIds.size} chunks, maxBuffer=$maxCachedChunks")
+        MemoryManager.logMemoryStatus(context, TAG)
+        
+        // Clear buffer state
+        cachedChunks.clear()
+        chunkAccessOrder.clear()
         
         // Start downloading first few chunks immediately for quick playback start
         startPriorityDownloads()
@@ -156,6 +171,16 @@ class ChunkedStreamingManager(
         val cfg = config ?: return
         if (chunkIndex >= chunkFileIds.size) return
         
+        // Check memory before downloading
+        if (MemoryManager.isCriticalMemory(context)) {
+            Log.w(TAG, "Critical memory - pausing chunk $chunkIndex download")
+            delay(2000) // Wait for memory to free up
+            return
+        }
+        
+        // Evict old chunks if buffer is full
+        evictOldChunksIfNeeded()
+        
         val fileId = chunkFileIds[chunkIndex]
         // Round-robin token assignment (same as upload): token = tokens[chunkIndex % tokens.size]
         val token = if (uploaderTokens.isNotEmpty()) {
@@ -166,40 +191,64 @@ class ChunkedStreamingManager(
         
         val chunkFile = getChunkFile(chunkIndex)
         
-        Log.d(TAG, "Downloading chunk $chunkIndex with token ${token.take(10)}... (using token index ${chunkIndex % uploaderTokens.size})")
+        Log.d(TAG, "Downloading chunk $chunkIndex with token ${token.take(10)}... (buffer: ${cachedChunks.size}/$maxCachedChunks)")
         
         val botClient = TelegramBotClient(token)
         
-        try {
-            // Get file path from Telegram using the correct token
-            val fileResponse = botClient.getFile(fileId)
-            val telegramFilePath = fileResponse.filePath
-            
-            if (telegramFilePath.isBlank()) {
-                Log.e(TAG, "Failed to get file path for chunk $chunkIndex")
-                return
-            }
-            
-            // Download file with progress
-            val bytes = botClient.downloadFileToBytes(telegramFilePath) { progress ->
-                updateChunkProgress(chunkIndex, progress)
-            }
-            
-            if (bytes != null) {
-                chunkFile.writeBytes(bytes)
-                markChunkComplete(chunkIndex)
-                Log.d(TAG, "Chunk $chunkIndex downloaded: ${bytes.size} bytes")
+        // Use error recovery for download with retry
+        val result = ErrorRecoveryManager.executeWithRetry(
+            operation = "Download chunk $chunkIndex",
+            maxRetries = 3
+        ) { attempt ->
+            try {
+                // Get file path from Telegram using the correct token
+                val fileResponse = botClient.getFile(fileId)
+                val telegramFilePath = fileResponse.filePath
                 
-                // Start downloading next chunk
-                if (chunkIndex + 1 < chunkFileIds.size) {
-                    startChunkDownload(chunkIndex + 1)
+                if (telegramFilePath.isBlank()) {
+                    throw Exception("Failed to get file path for chunk $chunkIndex")
                 }
+                
+                // Download file with progress
+                val bytes = botClient.downloadFileToBytes(telegramFilePath) { progress ->
+                    updateChunkProgress(chunkIndex, progress)
+                }
+                
+                if (bytes != null) {
+                    chunkFile.writeBytes(bytes)
+                    markChunkComplete(chunkIndex)
+                    
+                    // Track in buffer
+                    cachedChunks.add(chunkIndex)
+                    chunkAccessOrder.add(chunkIndex)
+                    
+                    Log.d(TAG, "Chunk $chunkIndex downloaded: ${bytes.size} bytes")
+                    
+                    // Start downloading next chunk
+                    if (chunkIndex + 1 < chunkFileIds.size) {
+                        startChunkDownload(chunkIndex + 1)
+                    }
+                    
+                    bytes.size // Return success
+                } else {
+                    throw Exception("Download returned null for chunk $chunkIndex")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error downloading chunk $chunkIndex (attempt ${attempt + 1})", e)
+                throw e
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error downloading chunk $chunkIndex", e)
-        } finally {
-            downloadJobs.remove(chunkIndex)
         }
+        
+        when (result) {
+            is ErrorRecoveryManager.RecoveryResult.Success -> {
+                Log.d(TAG, "Chunk $chunkIndex download successful")
+            }
+            is ErrorRecoveryManager.RecoveryResult.Failure -> {
+                Log.e(TAG, "Chunk $chunkIndex download failed after retries", result.error)
+            }
+        }
+        
+        downloadJobs.remove(chunkIndex)
     }
     
     private fun getChunkFile(chunkIndex: Int): File {
@@ -237,12 +286,33 @@ class ChunkedStreamingManager(
     }
     
     /**
+     * Evict old chunks from buffer using LRU strategy
+     */
+    private fun evictOldChunksIfNeeded() {
+        while (cachedChunks.size >= maxCachedChunks && chunkAccessOrder.isNotEmpty()) {
+            val oldestChunk = chunkAccessOrder.removeAt(0)
+            cachedChunks.remove(oldestChunk)
+            
+            // Delete the chunk file to free memory
+            val chunkFile = getChunkFile(oldestChunk)
+            if (chunkFile.exists()) {
+                chunkFile.delete()
+                Log.d(TAG, "Evicted chunk $oldestChunk from buffer (LRU)")
+            }
+        }
+    }
+    
+    /**
      * Cancel all downloads and clean up
      * @param keepChunks If true, chunks will not be deleted (for permanent storage)
      */
     fun release(keepChunks: Boolean = false) {
         downloadJobs.values.forEach { it.cancel() }
         downloadJobs.clear()
+        
+        // Clear buffer tracking
+        cachedChunks.clear()
+        chunkAccessOrder.clear()
         
         // Only clean up streaming directory if not keeping chunks
         if (!keepChunks) {

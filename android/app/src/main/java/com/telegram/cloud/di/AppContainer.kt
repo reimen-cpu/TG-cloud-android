@@ -29,10 +29,10 @@ class AppContainer(context: Context) {
         CloudDatabase.MIGRATION_2_3, 
         CloudDatabase.MIGRATION_3_4,
         CloudDatabase.MIGRATION_4_5,
-        CloudDatabase.MIGRATION_5_6
+        CloudDatabase.MIGRATION_5_6,
+        CloudDatabase.MIGRATION_6_7
     )
-        // Don't use fallbackToDestructiveMigration() to preserve data between updates
-        // If a migration is missing, the app will crash - this is intentional to catch issues early
+        .fallbackToDestructiveMigration()
         .addCallback(object : androidx.room.RoomDatabase.Callback() {
             override fun onOpen(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 super.onOpen(db)

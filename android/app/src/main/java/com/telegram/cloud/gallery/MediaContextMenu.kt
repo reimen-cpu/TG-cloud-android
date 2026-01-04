@@ -324,46 +324,35 @@ fun RenameMediaDialog(
 /**
  * Delete confirmation dialog
  */
+/**
+ * Move to trash confirmation dialog
+ */
 @Composable
 fun DeleteMediaDialog(
     media: GalleryMediaEntity,
     onDismiss: () -> Unit,
-    onDelete: (deleteFromTelegram: Boolean) -> Unit
+    onDelete: () -> Unit
 ) {
-    var deleteFromTelegram by remember { mutableStateOf(false) }
-    
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Delete", color = Color.White) },
+        title = { Text("Move to Trash", color = Color.White) },
         text = {
             Column {
                 Text(
-                    "Delete \"${media.filename}\"?",
+                    "Move \"${media.filename}\" to trash?",
                     color = Color.White
                 )
                 Spacer(Modifier.height(12.dp))
-                if (media.isSynced) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = deleteFromTelegram,
-                            onCheckedChange = { deleteFromTelegram = it },
-                            colors = CheckboxDefaults.colors(
-                                checkedColor = Color(0xFF3390EC)
-                            )
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "Also delete from Telegram Cloud",
-                            color = Color.Gray,
-                            fontSize = 14.sp
-                        )
-                    }
-                }
+                Text(
+                    "Items in trash will be deleted after 30 days.",
+                    color = Color.Gray,
+                    fontSize = 14.sp
+                )
             }
         },
         confirmButton = {
-            TextButton(onClick = { onDelete(deleteFromTelegram) }) {
-                Text("Delete", color = Color(0xFFEF5350))
+            TextButton(onClick = { onDelete() }) {
+                Text("Move to Trash", color = Color(0xFFEF5350))
             }
         },
         dismissButton = {

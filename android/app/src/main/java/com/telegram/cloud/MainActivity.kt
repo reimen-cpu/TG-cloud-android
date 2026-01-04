@@ -686,6 +686,7 @@ class MainActivity : AppCompatActivity() {
                             showGallery && config != null -> {
                                 // State for media viewer
                                 var selectedMedia by rememberSaveable { mutableStateOf<Long?>(null) }
+                                var showTrash by rememberSaveable { mutableStateOf(false) }
                                 
                                 // State for context menu
                                 var mediaForContextMenu by remember { mutableStateOf<GalleryMediaEntity?>(null) }
@@ -808,8 +809,8 @@ class MainActivity : AppCompatActivity() {
                                     DeleteMediaDialog(
                                         media = mediaForContextMenu!!,
                                         onDismiss = { showDeleteDialog = false },
-                                        onDelete = { deleteFromTelegram ->
-                                            galleryViewModel.deleteMedia(mediaForContextMenu!!, deleteFromTelegram, config)
+                                        onDelete = {
+                                            galleryViewModel.moveToTrash(mediaForContextMenu!!)
                                             showDeleteDialog = false
                                             mediaForContextMenu = null
                                         }
@@ -822,27 +823,27 @@ class MainActivity : AppCompatActivity() {
                                         onDismissRequest = { mediaToDeleteBatch = null },
                                         title = { 
                                             Text(
-                                                "Eliminar ${mediaList.size} archivo(s)",
+                                                "Mover a la papelera ${mediaList.size} archivo(s)",
                                                 style = MaterialTheme.typography.titleLarge
                                             ) 
                                         },
                                         text = { 
                                             Text(
-                                                "¿Estás seguro de que deseas eliminar estos archivos? Esta acción no se puede deshacer.",
+                                                "¿Estás seguro de que deseas mover estos archivos a la papelera? Se eliminarán permanentemente después de 30 días.",
                                                 style = MaterialTheme.typography.bodyMedium
-                                            ) 
+                                            )  
                                         },
                                         confirmButton = {
                                             Button(
                                                 onClick = {
                                                     scope.launch {
-                                                        val result = multiFileGalleryManager.deleteMultiple(mediaList, false, config)
+                                                        val result = multiFileGalleryManager.moveToTrashMultiple(mediaList)
                                                         snackbarHostState.showSnackbar(context.getString(R.string.files_deleted, result.successful))
                                                     }
                                                 },
                                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                                             ) {
-                                                Text("Eliminar")
+                                                Text("A Papelera")
                                             }
                                         },
                                         dismissButton = {
@@ -851,11 +852,26 @@ class MainActivity : AppCompatActivity() {
                                             }
                                         },
                                         containerColor = MaterialTheme.colorScheme.surface,
-                                        shape = MaterialTheme.shapes.large
                                     )
                                 }
                                 
-                                if (mediaToView != null) {
+                                if (showTrash) {
+                                    val trashItems by galleryViewModel.trashItems.collectAsState()
+                                    
+                                    BackHandler { showTrash = false }
+                                    
+                                    TrashScreen(
+                                        trashItems = trashItems,
+                                        onBack = { showTrash = false },
+                                        onRestore = { media -> galleryViewModel.restoreFromTrash(media) },
+                                        onDeletePermanently = { media -> 
+                                            // Always delete from telegram if we are in trash screen?
+                                            galleryViewModel.deletePermanently(media, true, config) 
+                                        },
+                                        onEmptyTrash = { galleryViewModel.emptyTrash(config) },
+                                        onRestoreAll = { galleryViewModel.restoreFromTrash(trashItems) }
+                                    )
+                                } else if (mediaToView != null) {
                                     // Check if this media is currently being synced
                                     val isCurrentlySyncing = when (val state = gallerySyncState) {
                                         is com.telegram.cloud.gallery.GallerySyncManager.SyncState.Syncing -> {
@@ -868,22 +884,34 @@ class MainActivity : AppCompatActivity() {
                                     val currentUploadProgress = if (isCurrentlySyncing) gallerySyncProgress else 0f
                                     
                                     // Show full screen viewer
+                                    // Calculate sync state for the viewer
+                                    val currentSyncMediaId = if (gallerySyncState is com.telegram.cloud.gallery.GallerySyncManager.SyncState.Syncing) {
+                                        // We need to find the media ID for the current syncing file
+                                        // This is a bit inefficient but safe: find media with this filename
+                                        galleryUiState.currentMedia.find { 
+                                            it.filename == (gallerySyncState as com.telegram.cloud.gallery.GallerySyncManager.SyncState.Syncing).currentFile 
+                                        }?.id
+                                    } else null
+                                    
+                                    val isAnySyncing = gallerySyncState is com.telegram.cloud.gallery.GallerySyncManager.SyncState.Syncing
+
                                     MediaViewerScreen(
-                                        media = mediaToView,
+                                        initialMediaId = mediaToView.id,
+                                        mediaList = galleryUiState.currentMedia,
                                         onBack = { selectedMedia = null },
-                                        onSync = {
+                                        onSync = { mediaToSync ->
                                             config?.let { cfg ->
                                                 galleryViewModel.syncSingleMedia(
-                                                    media = mediaToView,
+                                                    media = mediaToSync,
                                                     config = cfg,
                                                     onProgress = null // Progress is handled by GallerySyncManager
                                                 )
                                             }
                                         },
-                                        onDownloadFromTelegram = { media, onProgress, onSuccess, onError ->
+                                        onDownloadFromTelegram = { mediaToDownload, onProgress, onSuccess, onError ->
                                             config?.let { cfg ->
                                                 galleryViewModel.downloadFromTelegram(
-                                                    media = media,
+                                                    media = mediaToDownload,
                                                     config = cfg,
                                                     onProgress = onProgress,
                                                     onSuccess = onSuccess,
@@ -891,15 +919,16 @@ class MainActivity : AppCompatActivity() {
                                                 )
                                             } ?: onError("Config not available")
                                         },
-                                        onFileDownloaded = { localPath: String ->
+                                        onFileDownloaded = { mediaId, localPath ->
                                             // Update database with new local path for chunked streaming downloads
-                                            galleryViewModel.updateLocalPath(mediaToView.id, localPath)
+                                            galleryViewModel.updateLocalPath(mediaId, localPath)
                                         },
                                         onSyncClick = { progress ->
                                             // Progress is handled by GallerySyncManager
                                         },
-                                        isSyncing = isCurrentlySyncing,
-                                        uploadProgress = currentUploadProgress,
+                                        isSyncing = isAnySyncing,
+                                        currentSyncMediaId = currentSyncMediaId,
+                                        uploadProgress = gallerySyncProgress,
                                         config = config
                                     )
                                 } else {
@@ -1007,7 +1036,8 @@ class MainActivity : AppCompatActivity() {
                                                     )
                                                 }
                                             }
-                                        }
+                                        },
+                                        onOpenTrash = { showTrash = true }
                                     )
                                 }
                             }
