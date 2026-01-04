@@ -739,6 +739,7 @@ fun DashboardScreen(
                                 }
                             },
                             onLongClick = { fileForOptions = file },
+                            onViewMedia = { actions.onViewMedia(file) },
                             modifier = Modifier
                                 .semantics(mergeDescendants = false) {
                                     contentDescription = "${context.getString(R.string.file_fallback)} ${file.fileName}, tamaño ${formatFileSize(file.sizeBytes)}, fecha ${formatDate(file.uploadedAt)}"
@@ -778,6 +779,7 @@ fun DashboardScreen(
     onDownloadMultiple: (List<CloudFile>) -> Unit = {},
     onShareMultiple: (List<CloudFile>) -> Unit = {},
     onDeleteMultiple: (List<CloudFile>) -> Unit = {},
+    onViewMedia: (CloudFile) -> Unit = {},
     onCancelTask: (String) -> Unit = {}
 ) {
     val actions = remember(onUploadClick) {
@@ -797,6 +799,7 @@ fun DashboardScreen(
             override fun onDownloadMultiple(files: List<CloudFile>) = onDownloadMultiple(files)
             override fun onShareMultiple(files: List<CloudFile>) = onShareMultiple(files)
             override fun onDeleteMultiple(files: List<CloudFile>) = onDeleteMultiple(files)
+            override fun onViewMedia(file: CloudFile) = onViewMedia(file)
             override fun onCancelTask(taskId: String) = onCancelTask(taskId)
         }
     }
@@ -1431,9 +1434,12 @@ private fun FileCard(
     isSelected: Boolean,
     onSelect: () -> Unit,
     onLongClick: () -> Unit,
+    onViewMedia: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val fileColor = getFileTypeColor(file.mimeType)
+    val isMediaFile = file.mimeType?.startsWith("image/") == true || 
+                      file.mimeType?.startsWith("video/") == true
     
     Card(
         modifier = modifier
@@ -1472,12 +1478,19 @@ private fun FileCard(
             horizontalArrangement = Arrangement.spacedBy(Spacing.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Columna 1: Miniatura
+            // Columna 1: Miniatura (clickable for media files)
             Box(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(RoundedCornerShape(Radius.sm))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)),
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f))
+                    .then(
+                        if (isMediaFile && onViewMedia != null) {
+                            Modifier.clickable(onClick = onViewMedia)
+                        } else {
+                            Modifier
+                        }
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(

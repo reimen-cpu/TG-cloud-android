@@ -1005,11 +1005,8 @@ class MainActivity : AppCompatActivity() {
                                         onSelectedShare = { selectedMediaList ->
                                             // Share multiple files using .link generation
                                             if (selectedMediaList.isNotEmpty()) {
-                                                if (selectedMediaList.size == 1) {
-                                                    viewModel.showShareGalleryMediaDialog(selectedMediaList.first())
-                                                } else {
-                                                    viewModel.showShareGalleryMediaBatchDialog(selectedMediaList)
-                                                }
+                                                mediaListToShare = selectedMediaList
+                                                showShareDialog = true
                                             }
                                         },
                                         onSelectedDownload = { selectedMediaList ->

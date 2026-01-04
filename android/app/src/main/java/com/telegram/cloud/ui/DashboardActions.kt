@@ -22,5 +22,6 @@ interface DashboardActions {
     fun onDownloadMultiple(files: List<CloudFile>)
     fun onShareMultiple(files: List<CloudFile>)
     fun onDeleteMultiple(files: List<CloudFile>)
+    fun onViewMedia(file: CloudFile)
     fun onCancelTask(taskId: String)
 }
