@@ -72,15 +72,12 @@ class GalleryViewModel(
     private val activeStreamingManagers = mutableMapOf<Long, com.telegram.cloud.gallery.streaming.ChunkedStreamingManager>()
 
     val uiState: StateFlow<GalleryUiState> = combine(
-        _mediaList,
+        _mediaList.debounce(300), // Debounce to batch rapid updates during sync
         _filterState
     ) { list, filter -> Pair(list, filter) }
-    .transformLatest { (mediaList, filter) ->
-        // Emit loading state immediately with empty lists to prevent stale data
-        emit(GalleryUiState(isLoading = true))
-        
+    .map { (mediaList, filter) ->
         // Run heavy grouping and filtering on Default dispatcher
-        val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
              val albums = AlbumGrouper.groupByAlbums(mediaList)
             
             var filteredMedia = if (filter.selectedAlbumPath != null) {
@@ -141,7 +138,6 @@ class GalleryViewModel(
                 isLoading = false
             )
         }
-        emit(result)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), GalleryUiState(isLoading = true))
     
     private fun isSameDay(cal1: java.util.Calendar, cal2: java.util.Calendar): Boolean {
@@ -203,63 +199,9 @@ class GalleryViewModel(
                     Log.d(TAG, "Inserted ${newMedia.size} new media files")
                 }
                 
-                // Generate thumbnails for ALL media without thumbnails or with missing files
-                val allMedia = galleryDao.getAll()
-                val mediaWithoutThumbs = allMedia.filter { 
-                    it.thumbnailPath == null || !java.io.File(it.thumbnailPath).exists() 
-                }
-                val totalThumbs = mediaWithoutThumbs.size
-                Log.d(TAG, "Generating thumbnails for $totalThumbs media files (new or missing)...")
-                
-                val generatedCount = java.util.concurrent.atomic.AtomicInteger(0)
-                val progressStep = if (totalThumbs <= 0) 1 else max(1, totalThumbs / 20)
-                
-                // Parallelize thumbnail generation with Semaphore to avoid OOM but speed up processing
-                // Use 4 concurrent workers (good balance for I/O + CPU image processing)
-                val parallelism = 4
-                val semaphore = kotlinx.coroutines.sync.Semaphore(parallelism)
-                
-                // Process in parallel
-                // Process in parallel with batching to avoid overheating/OOM
-                // Chunking ensures we don't create thousands of coroutine objects at once
-                val batchSize = 50
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    mediaWithoutThumbs.chunked(batchSize).forEach { batch ->
-                        val jobs = batch.map { media ->
-                            async {
-                                semaphore.acquire()
-                                try {
-                                    val thumbPath = mediaScanner.generateThumbnail(media)
-                                    if (thumbPath != null) {
-                                        galleryDao.updateThumbnail(media.id, thumbPath)
-                                    } else {
-                                        Log.w(TAG, "Failed to generate thumbnail for: ${media.filename}")
-                                    }
-                                    
-                                    val count = generatedCount.incrementAndGet()
-                                    val remaining = totalThumbs - count
-                                    if (count % progressStep == 0 || count == totalThumbs) {
-                                        Log.d(
-                                            TAG,
-                                            "Thumbnail progress: $count/$totalThumbs (remaining $remaining)"
-                                        )
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Error generating thumbnail for ${media.filename}", e)
-                                } finally {
-                                    semaphore.release()
-                                }
-                                Unit // Explicit return
-                            }
-                        }
-                        jobs.awaitAll()
-                        // Yield to allow other tasks to process if needed
-                        kotlinx.coroutines.yield()
-                    }
-                }
-                
-                Log.d(TAG, "Thumbnail generation complete: ${generatedCount.get()}/$totalThumbs")
-                // No need to reload - Flow will auto-update
+                // Thumbnails will be generated on-demand when needed by UI
+                // This prevents massive regeneration on every gallery open
+                Log.d(TAG, "Media scan complete. Thumbnails will be generated on-demand.")
             } catch (e: Exception) {
                 Log.e(TAG, "Error scanning media", e)
             } finally {

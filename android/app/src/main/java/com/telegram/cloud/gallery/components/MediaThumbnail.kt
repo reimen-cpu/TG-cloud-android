@@ -11,7 +11,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,6 +35,10 @@ import coil.request.ImageRequest
 import coil.request.videoFrameMillis
 import com.telegram.cloud.R
 import com.telegram.cloud.gallery.GalleryMediaEntity
+import com.telegram.cloud.gallery.MediaScanner
+import com.telegram.cloud.gallery.ThumbnailCache
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -46,9 +54,30 @@ fun MediaThumbnail(
     val context = LocalContext.current
     val materialTheme = MaterialTheme.colorScheme
     
+    // Check cache first, then database thumbnail path
+    var thumbnailPath by remember(media.id) {
+        mutableStateOf(ThumbnailCache.getThumbnail(media.id, media.thumbnailPath))
+    }
+    
     // Check if local file exists
     val localFileExists = remember(media.localPath) {
         File(media.localPath).exists()
+    }
+    
+    // Generate thumbnail on-demand if missing
+    LaunchedEffect(media.id, thumbnailPath, localFileExists) {
+        if (thumbnailPath == null && localFileExists) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val scanner = MediaScanner(context)
+                    val generated = scanner.generateThumbnail(media)
+                    generated?.let { thumbnailPath = it }
+                } catch (e: Exception) {
+                    android.util.Log.e("MediaThumbnail", "Failed to generate thumbnail on-demand", e)
+                }
+                Unit // Explicit return
+            }
+        }
     }
     
     Box(
@@ -69,9 +98,8 @@ fun MediaThumbnail(
                 onLongClick = onLongClick
             )
     ) {
-        // Thumbnail image - always use thumbnail if available (thumbnails are stored locally forever)
-        // Fall back to local path only if thumbnail doesn't exist
-        val thumbnailFile = media.thumbnailPath?.let { File(it) }
+        // Determine image source: cached thumbnail > database thumbnail > local file > null
+        val thumbnailFile = thumbnailPath?.let { File(it) }
         val localFile = File(media.localPath)
         
         val imageSource = when {
@@ -97,7 +125,7 @@ fun MediaThumbnail(
                             }
                             // Optimize: Grab frame at 50% or at least 1s in to avoid black frames
                             // Using videoFrameMillis to request specific frame
-                             val frameTime = if (media.durationMs > 0) media.durationMs / 2 else 1000L
+                            val frameTime = if (media.durationMs > 0) media.durationMs / 2 else 1000L
                             videoFrameMillis(frameTime)
                         }
                     }

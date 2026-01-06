@@ -198,10 +198,19 @@ class MediaScanner(private val context: Context) {
      */
     suspend fun generateThumbnail(media: GalleryMediaEntity): String? = withContext(Dispatchers.IO) {
         try {
+            // Check cache first - avoid redundant file system checks
+            val cached = ThumbnailCache.getThumbnail(media.id, media.thumbnailPath)
+            if (cached != null) {
+                Log.d(TAG, "Using cached thumbnail for ${media.filename}")
+                return@withContext cached
+            }
+            
             val thumbDir = File(context.cacheDir, "gallery_thumbs").apply { mkdirs() }
             val thumbFile = File(thumbDir, "${media.id}_thumb.jpg")
             
+            // If file exists on disk but wasn't in cache, add it to cache
             if (thumbFile.exists() && thumbFile.length() > 0) {
+                ThumbnailCache.putThumbnail(media.id, thumbFile.absolutePath)
                 return@withContext thumbFile.absolutePath
             }
             
@@ -235,7 +244,10 @@ class MediaScanner(private val context: Context) {
                 if (finalBitmap != bitmap) {
                     finalBitmap.recycle()
                 }
-                Log.d(TAG, "Generated thumbnail for ${media.filename}")
+                
+                // Cache the newly generated thumbnail
+                ThumbnailCache.putThumbnail(media.id, thumbFile.absolutePath)
+                Log.d(TAG, "Generated and cached thumbnail for ${media.filename}")
                 return@withContext thumbFile.absolutePath
             }
             
