@@ -494,4 +494,10 @@ if [ -f "android/gradlew" ]; then
 fi
 
 log_success "local.properties generated in 'android/local.properties'"
-log_success "Build Preparation Complete! You can now run './gradlew assembleDebug' in the android/ directory."
+log_success "Build Preparation Complete! Starting Gradle Build..."
+
+# 7. Run Gradle Build
+# ------------------------------------------------------------------------------
+log_step "Running Gradle Build..."
+cd android
+./gradlew assembleDebug
