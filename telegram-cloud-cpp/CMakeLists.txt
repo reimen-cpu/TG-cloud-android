@@ -65,13 +65,28 @@ target_include_directories(telegramcloud_core PUBLIC
 
 # --- 5. Configuración de Librerías Nativas Manuales ---
 # Normalizar nombre de carpeta (arm64-v8a -> arm64_v8a)
+# Normalizar nombre de carpeta (arm64-v8a -> arm64_v8a)
 string(REPLACE "-" "_" ABI_SAFE ${ANDROID_ABI})
-set(LIB_BASE "$ENV{HOME}/android-native-builds")
+string(TOUPPER ${ABI_SAFE} ABI_UPPER)
 
-# Rutas
-set(OPENSSL_ROOT "${LIB_BASE}/openssl/build_${ABI_SAFE}/installed")
-set(CURL_ROOT    "${LIB_BASE}/libcurl/build_${ABI_SAFE}/installed")
-set(SQL_ROOT     "${LIB_BASE}/sqlcipher/build_${ABI_SAFE}/installed")
+# Rutas: Usar variables de Gradle si existen, sino fallback a default
+if(DEFINED OPENSSL_ROOT_DIR_${ABI_UPPER})
+    set(OPENSSL_ROOT "${OPENSSL_ROOT_DIR_${ABI_UPPER}}")
+else()
+    set(OPENSSL_ROOT "$ENV{HOME}/android-native-builds/openssl/build_${ABI_SAFE}/installed")
+endif()
+
+if(DEFINED CURL_ROOT_${ABI_UPPER})
+    set(CURL_ROOT "${CURL_ROOT_${ABI_UPPER}}")
+else()
+    set(CURL_ROOT "$ENV{HOME}/android-native-builds/libcurl/build_${ABI_SAFE}/installed")
+endif()
+
+if(DEFINED SQLCIPHER_ROOT_${ABI_UPPER})
+    set(SQL_ROOT "${SQLCIPHER_ROOT_${ABI_UPPER}}")
+else()
+    set(SQL_ROOT "$ENV{HOME}/android-native-builds/sqlcipher/build_${ABI_SAFE}/installed")
+endif()
 
 # Includes de librerías
 target_include_directories(telegramcloud_core PRIVATE

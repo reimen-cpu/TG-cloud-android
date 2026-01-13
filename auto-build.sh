@@ -95,6 +95,17 @@ trap cleanup EXIT
 
 log_step "Configuring Environment..."
 
+# Check for JDK (javac)
+if ! command -v javac &> /dev/null; then
+    log_error "JDK not found! 'javac' is missing."
+    log_error "You seem to have only the JRE installed."
+    log_error "Please install the full JDK (e.g., sudo apt install openjdk-21-jdk)."
+    # We don't exit here because auto-build.sh mainly prepares native libs, 
+    # but we warn the user that the final gradle build will likely fail.
+    echo -e "${COLOR_RED}Warning: Gradle build will fail without JDK.${COLOR_RESET}"
+    sleep 3
+fi
+
 # Get user home directory
 USER_HOME="$HOME"
 
@@ -378,6 +389,13 @@ log_step "Finalizing..."
 cd "$PROJECT_ROOT"
 
 # Ensure we use the correct SDK location for Gradle
+# Generate gradle.properties
+cat > android/gradle.properties <<EOF
+android.useAndroidX=true
+android.enableJetifier=true
+org.gradle.jvmargs=-Xmx4g
+EOF
+
 cat > android/local.properties <<EOF
 sdk.dir=$ANDROID_HOME
 ndk.dir=$ANDROID_NDK_HOME
@@ -388,6 +406,11 @@ native.curl.armeabi-v7a=$WORK_DIR/builds/libcurl/build_armeabi_v7a/installed
 native.sqlcipher.arm64-v8a=$WORK_DIR/builds/sqlcipher/build_arm64_v8a/installed
 native.sqlcipher.armeabi-v7a=$WORK_DIR/builds/sqlcipher/build_armeabi_v7a/installed
 EOF
+
+# Ensure gradlew is executable
+if [ -f "android/gradlew" ]; then
+    chmod +x android/gradlew
+fi
 
 log_success "local.properties generated in 'android/local.properties'"
 log_success "Build Preparation Complete! You can now run './gradlew assembleDebug' in the android/ directory."
