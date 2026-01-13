@@ -12,6 +12,10 @@ set -e
 # - Generates android/local.properties automatically
 # ==============================================================================
 
+# Get project root directory (directory where script is located)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PROJECT_ROOT="$SCRIPT_DIR"
+
 # --- Helpers for UI/Logging ---
 
 COLOR_RESET='\033[0m'
@@ -42,8 +46,8 @@ run_with_spinner() {
     local message="$1"
     shift
     
-    # Run command in background and capture output to a log file
-    local log_file=$(mktemp)
+    # Create log file with absolute path
+    local log_file="${PROJECT_ROOT}/build_output_$$.log"
     "$@" > "$log_file" 2>&1 &
     local pid=$!
     
@@ -64,13 +68,16 @@ run_with_spinner() {
     
     if [ $exit_code -eq 0 ]; then
         printf " ${COLOR_GREEN}[DONE]${COLOR_RESET}\n"
-        rm "$log_file"
+        rm -f "$log_file"
         return 0
     else
         printf " ${COLOR_RED}[FAILED]${COLOR_RESET}\n"
-        echo -e "${COLOR_RED}Command failed. Output tail:${COLOR_RESET}"
-        tail -n 20 "$log_file"
-        rm "$log_file"
+        echo -e "${COLOR_RED}Command failed. Full output:${COLOR_RESET}"
+        cat "$log_file"
+        # Rename to error log with timestamp
+        local error_log="${PROJECT_ROOT}/build_error_$(date +%s).log"
+        mv "$log_file" "$error_log" 2>/dev/null || true
+        echo -e "${COLOR_RED}Error log saved to: $error_log${COLOR_RESET}"
         return $exit_code
     fi
 }
@@ -88,32 +95,86 @@ trap cleanup EXIT
 
 log_step "Configuring Environment..."
 
-export ANDROID_HOME="${ANDROID_HOME:-$HOME/android-sdk}"
+# Get user home directory
+USER_HOME="$HOME"
 
-# Detect NDK
+# Detect ANDROID_HOME
+if [ -z "$ANDROID_HOME" ]; then
+    log_info "ANDROID_HOME not set. Searching in common locations..."
+    for location in \
+        "$USER_HOME/Android/Sdk" \
+        "$USER_HOME/android-sdk" \
+        "$USER_HOME/.android/sdk" \
+        "/opt/android-sdk"; do
+        if [ -d "$location" ]; then
+            export ANDROID_HOME="$location"
+            log_success "Found ANDROID_HOME: $ANDROID_HOME"
+            break
+        fi
+    done
+    if [ -z "$ANDROID_HOME" ]; then
+        log_error "ANDROID_HOME not found. Please set it manually or install Android SDK."
+        exit 1
+    fi
+else
+    log_info "Using ANDROID_HOME: $ANDROID_HOME"
+fi
+
+# Detect ANDROID_NDK_HOME
 if [ -z "$ANDROID_NDK_HOME" ]; then
     if [ -n "$ANDROID_NDK" ]; then
-         export ANDROID_NDK_HOME="$ANDROID_NDK"
-    elif [ -d "$ANDROID_HOME/ndk/25.2.9519653" ]; then
-        export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/25.2.9519653"
+        export ANDROID_NDK_HOME="$ANDROID_NDK"
+        log_success "Using ANDROID_NDK from ANDROID_NDK: $ANDROID_NDK_HOME"
     else
-         log_info "ANDROID_NDK_HOME not explicitly set. Searching in default location..."
-         FOUND_NDK=$(ls -d $ANDROID_HOME/ndk/* 2>/dev/null | head -n 1)
-         if [ -n "$FOUND_NDK" ]; then
-             export ANDROID_NDK_HOME="$FOUND_NDK"
-             log_success "Found NDK: $ANDROID_NDK_HOME"
-         else
-             log_error "ANDROID_NDK_HOME not found. Please set it manually."
-             exit 1
-         fi
+        log_info "ANDROID_NDK_HOME not set. Searching in common locations..."
+        for location in \
+            "$USER_HOME/Android/android-ndk-r25b" \
+            "$USER_HOME/Android/android-ndk-r25c" \
+            "$USER_HOME/Android/Sdk/ndk/25.2.9519653" \
+            "$USER_HOME/Android/Sdk/ndk/25.1.8937393" \
+            "$ANDROID_HOME/ndk/25.2.9519653" \
+            "$ANDROID_HOME/ndk/25.1.8937393" \
+            "/opt/android-ndk"; do
+            if [ -d "$location" ]; then
+                export ANDROID_NDK_HOME="$location"
+                log_success "Found ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
+                break
+            fi
+        done
+        
+        # If not found in specific locations, search for any NDK version
+        if [ -z "$ANDROID_NDK_HOME" ]; then
+            if [ -d "$ANDROID_HOME/ndk" ]; then
+                FOUND_NDK=$(ls -d "$ANDROID_HOME/ndk"/* 2>/dev/null | head -n 1)
+                if [ -n "$FOUND_NDK" ]; then
+                    export ANDROID_NDK_HOME="$FOUND_NDK"
+                    log_success "Found NDK in $ANDROID_HOME/ndk: $ANDROID_NDK_HOME"
+                fi
+            fi
+            
+            # Also check common user directories
+            if [ -z "$ANDROID_NDK_HOME" ] && [ -d "$USER_HOME/Android" ]; then
+                FOUND_NDK=$(find "$USER_HOME/Android" -maxdepth 2 -type d -name "android-ndk-*" 2>/dev/null | head -n 1)
+                if [ -n "$FOUND_NDK" ]; then
+                    export ANDROID_NDK_HOME="$FOUND_NDK"
+                    log_success "Found NDK in $USER_HOME/Android: $ANDROID_NDK_HOME"
+                fi
+            fi
+        fi
+        
+        if [ -z "$ANDROID_NDK_HOME" ]; then
+            log_error "ANDROID_NDK_HOME not found. Please set it manually or install Android NDK."
+            exit 1
+        fi
     fi
+else
+    log_info "Using ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
 fi
 
 if [ -z "$API" ]; then
     export API=28
 fi
 
-export PROJECT_ROOT="$(pwd)"
 export WORK_DIR="$PROJECT_ROOT/native-build-work"
 
 log_info "Using settings:"
@@ -123,10 +184,9 @@ echo "  PROJECT_ROOT:     $PROJECT_ROOT"
 echo "  WORK_DIR:         $WORK_DIR"
 echo "  API Level:        $API"
 
-# Clean work directory
+# Clean and create work directory
 rm -rf "$WORK_DIR"
-mkdir -p "$WORK_DIR/sources"
-mkdir -p "$WORK_DIR/builds"
+mkdir -p "$WORK_DIR/sources" "$WORK_DIR/builds"
 
 # 2. CMake Wrapper
 # ------------------------------------------------------------------------------
@@ -242,11 +302,10 @@ log_success "SQLCipher CMakeLists.txt generated."
 log_step "Patching Repo Build Scripts..."
 
 cd "$PROJECT_ROOT"
-# We make a backup before sed ensure idempotency if run multiple times locally? 
-# Actually git checkout or reset is better, but this is a build script. 
-# We'll just run sed.
-sed -i "s|./Configure|./Configure \$OPENSSL_OPTS -fPIC|g" telegram-cloud-cpp/third_party/android_build_scripts/build_openssl_android.sh
-log_success "Scripts patched."
+log_info "Using existing build scripts (no patching needed)."
+
+# Ensure build scripts are executable
+chmod +x telegram-cloud-cpp/third_party/android_build_scripts/*.sh
 
 
 # 5. Compile
@@ -257,14 +316,16 @@ mkdir -p "$WORK_DIR/builds/openssl"
 mkdir -p "$WORK_DIR/builds/libcurl"
 mkdir -p "$WORK_DIR/builds/sqlcipher"
 
+
 for ABI in arm64-v8a armeabi-v7a; do
   log_info "---------------------------------------------------"
   log_info "Building for architecture: $ABI"
   log_info "---------------------------------------------------"
   
-  export OPENSSL_OPTS=""
   if [ "$ABI" == "armeabi-v7a" ]; then
       export OPENSSL_OPTS="no-asm"
+  else
+      export OPENSSL_OPTS=""
   fi
 
   # 5.1 Compile OpenSSL
@@ -320,8 +381,8 @@ cd "$PROJECT_ROOT"
 cat > android/local.properties <<EOF
 sdk.dir=$ANDROID_HOME
 ndk.dir=$ANDROID_NDK_HOME
-native.openssl.arm64-v8a=$WORK_DIR/builds/openssl/build_arm64_v8a/installed
-native.openssl.armeabi-v7a=$WORK_DIR/builds/openssl/build_armeabi_v7a/installed
+native.openssl.arm64-v8a=$WORK_DIR/builds/openssl/build-arm64-v8a/installed
+native.openssl.armeabi-v7a=$WORK_DIR/builds/openssl/build-armeabi-v7a/installed
 native.curl.arm64-v8a=$WORK_DIR/builds/libcurl/build_arm64_v8a/installed
 native.curl.armeabi-v7a=$WORK_DIR/builds/libcurl/build_armeabi_v7a/installed
 native.sqlcipher.arm64-v8a=$WORK_DIR/builds/sqlcipher/build_arm64_v8a/installed

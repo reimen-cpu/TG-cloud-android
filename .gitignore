@@ -119,6 +119,7 @@ android/build/
 android/.externalNativeBuild/
 android/.cxx/
 android/local.properties
+native-build-work/
 
 # Project-specific build directories
 **/build/

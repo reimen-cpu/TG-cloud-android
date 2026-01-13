@@ -178,7 +178,7 @@ cd "$BUILD_DIR"
 # Configure OpenSSL
 echo ""
 echo "[1/3] Configuring OpenSSL..."
-./Configure $OPENSSL_OPTS -fPIC $OPENSSL_OPTS -fPIC $OPENSSL_OPTS -fPIC $OPENSSL_OPTS -fPIC $OPENSSL_OPTS -fPIC $OPENSSL_OPTS -fPIC no-asm -fPIC "$OPENSSL_TARGET" \
+./Configure "${OPENSSL_OPTS:-}" -fPIC "$OPENSSL_TARGET" \
   -D__ANDROID_API__=$API \
   no-shared \
   --prefix="$INSTALL_DIR" \
