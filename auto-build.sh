@@ -90,6 +90,84 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Auto-fix function to handle common environment/project issues
+fix_common_issues() {
+    log_step "Checking for Project Inconsistencies..."
+
+    # 1. Fix NDK Version Mismatch in build.gradle.kts
+    if [ -f "$ANDROID_NDK_HOME/source.properties" ]; then
+        DETECTED_NDK_VERSION=$(grep "Pkg.Revision" "$ANDROID_NDK_HOME/source.properties" | cut -d= -f2 | tr -d ' ')
+        GRADLE_FILE="$PROJECT_ROOT/android/app/build.gradle.kts"
+        
+        if [ -f "$GRADLE_FILE" ]; then
+            CURRENT_NDK_SETTING=$(grep 'ndkVersion =' "$GRADLE_FILE" | cut -d'"' -f2)
+            if [ -n "$CURRENT_NDK_SETTING" ] && [ "$CURRENT_NDK_SETTING" != "$DETECTED_NDK_VERSION" ]; then
+                log_info "Mismatch in ndkVersion: Configured='$CURRENT_NDK_SETTING', Detected='$DETECTED_NDK_VERSION'"
+                log_info "Auto-fixing build.gradle.kts..."
+                sed -i "s/ndkVersion = \".*\"/ndkVersion = \"$DETECTED_NDK_VERSION\"/" "$GRADLE_FILE"
+            else
+                log_success "NDK Version match ($DETECTED_NDK_VERSION)"
+            fi
+        fi
+    fi
+
+    # 2. Fix CMakeLists.txt hardcoded paths
+    CMAKE_FILE="$PROJECT_ROOT/telegram-cloud-cpp/CMakeLists.txt"
+    if [ -f "$CMAKE_FILE" ] && grep -q 'set(LIB_BASE "$ENV{HOME}/android-native-builds")' "$CMAKE_FILE"; then
+        log_info "Detected hardcoded paths in CMakeLists.txt. Patching..."
+        
+        # Use Python for safe multi-line replacement
+        PATCHER_SCRIPT="$PROJECT_ROOT/patch_cmake_temp.py"
+        cat > "$PATCHER_SCRIPT" << 'EOF'
+import sys
+
+path = sys.argv[1]
+with open(path, 'r') as f:
+    content = f.read()
+
+old_block = """string(REPLACE "-" "_" ABI_SAFE ${ANDROID_ABI})
+set(LIB_BASE "$ENV{HOME}/android-native-builds")
+
+# Rutas
+set(OPENSSL_ROOT "${LIB_BASE}/openssl/build_${ABI_SAFE}/installed")
+set(CURL_ROOT    "${LIB_BASE}/libcurl/build_${ABI_SAFE}/installed")
+set(SQL_ROOT     "${LIB_BASE}/sqlcipher/build_${ABI_SAFE}/installed")"""
+
+new_block = """string(REPLACE "-" "_" ABI_SAFE ${ANDROID_ABI})
+string(TOUPPER ${ABI_SAFE} ABI_UPPER)
+
+# Rutas: Usar variables de Gradle si existen, sino fallback a default
+if(DEFINED OPENSSL_ROOT_DIR_${ABI_UPPER})
+    set(OPENSSL_ROOT "${OPENSSL_ROOT_DIR_${ABI_UPPER}}")
+else()
+    set(OPENSSL_ROOT "$ENV{HOME}/android-native-builds/openssl/build_${ABI_SAFE}/installed")
+endif()
+
+if(DEFINED CURL_ROOT_${ABI_UPPER})
+    set(CURL_ROOT "${CURL_ROOT_${ABI_UPPER}}")
+else()
+    set(CURL_ROOT "$ENV{HOME}/android-native-builds/libcurl/build_${ABI_SAFE}/installed")
+endif()
+
+if(DEFINED SQLCIPHER_ROOT_${ABI_UPPER})
+    set(SQL_ROOT "${SQLCIPHER_ROOT_${ABI_UPPER}}")
+else()
+    set(SQL_ROOT "$ENV{HOME}/android-native-builds/sqlcipher/build_${ABI_SAFE}/installed")
+endif()"""
+
+if old_block in content:
+    content = content.replace(old_block, new_block)
+    with open(path, 'w') as f:
+        f.write(content)
+    print("Patch applied.")
+else:
+    print("No patch needed.")
+EOF
+        python3 "$PATCHER_SCRIPT" "$CMAKE_FILE"
+        rm -f "$PATCHER_SCRIPT"
+    fi
+}
+
 # 1. Environment Configuration
 # ------------------------------------------------------------------------------
 
@@ -187,6 +265,9 @@ if [ -z "$API" ]; then
 fi
 
 export WORK_DIR="$PROJECT_ROOT/native-build-work"
+
+# Run auto-fixes after environment is set
+fix_common_issues
 
 log_info "Using settings:"
 echo "  ANDROID_HOME:     $ANDROID_HOME"
