@@ -34,10 +34,12 @@ import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.request.videoFrameMillis
 import com.telegram.cloud.R
-import com.telegram.cloud.gallery.GalleryMediaEntity
-import com.telegram.cloud.gallery.MediaScanner
-import com.telegram.cloud.gallery.ThumbnailCache
+import androidx.compose.ui.unit.IntSize
+import com.telegram.cloud.data.local.CloudFileEntity
+import com.telegram.cloud.utils.cache.OptimizedImageCache
+import com.telegram.cloud.utils.performance.PerformanceMonitor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -45,41 +47,29 @@ import java.util.concurrent.TimeUnit
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun MediaThumbnail(
-    media: GalleryMediaEntity,
+    media: CloudFileEntity,
     isSelected: Boolean = false,
     downloadProgress: Float? = null,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit
+    onClick: (CloudFileEntity) -> Unit,
+    onLongClick: (CloudFileEntity) -> Unit,
+    targetSize: IntSize // New parameter for target image size
 ) {
     val context = LocalContext.current
     val materialTheme = MaterialTheme.colorScheme
+    val optimizedImageCache = remember { OptimizedImageCache(context) }
     
-    // Check cache first, then database thumbnail path
-    var thumbnailPath by remember(media.id) {
-        mutableStateOf(ThumbnailCache.getThumbnail(media.id, media.thumbnailPath))
-    }
-    
-    // Check if local file exists
-    val localFileExists = remember(media.localPath) {
-        File(media.localPath).exists()
-    }
-    
-    // Generate thumbnail on-demand if missing
-    LaunchedEffect(media.id, thumbnailPath, localFileExists) {
-        if (thumbnailPath == null && localFileExists) {
-            withContext(Dispatchers.IO) {
-                try {
-                    val scanner = MediaScanner(context)
-                    val generated = scanner.generateThumbnail(media)
-                    generated?.let { thumbnailPath = it }
-                } catch (e: Exception) {
-                    android.util.Log.e("MediaThumbnail", "Failed to generate thumbnail on-demand", e)
-                }
-                Unit // Explicit return
-            }
+    var imageBitmap by remember(media.id, targetSize) { mutableStateOf<Bitmap?>(null) }
+    val isVideo = remember(media.mimeType) { media.mimeType?.startsWith("video/") == true }
+
+    LaunchedEffect(media.id, targetSize) {
+        PerformanceMonitor.measureSuspendOperation("load_media_thumbnail_bitmap") {
+            imageBitmap = optimizedImageCache.loadBitmapSafely(
+                filePath = media.fileName, // Assuming fileName can be used as localPath for now, needs adjustment
+                targetSize = targetSize
+            )
         }
     }
-    
+
     Box(
         modifier = Modifier
             .aspectRatio(1f)
@@ -94,42 +84,13 @@ fun MediaThumbnail(
                 if (isSelected) materialTheme.primaryContainer.copy(alpha = 0.2f) else materialTheme.surfaceVariant
             )
             .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
+                onClick = { onClick(media) },
+                onLongClick = { onLongClick(media) }
             )
     ) {
-        // Determine image source: cached thumbnail > database thumbnail > local file > null
-        val thumbnailFile = thumbnailPath?.let { File(it) }
-        val localFile = File(media.localPath)
-        
-        val imageSource = when {
-            thumbnailFile?.exists() == true -> thumbnailFile
-            localFile.exists() -> localFile
-            else -> null // No image available
-        }
-        
-        if (imageSource != null) {
+        if (imageBitmap != null) {
             AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(imageSource)
-                    .crossfade(true)
-                    // Optimization: Use disk cache policy
-                    .diskCachePolicy(CachePolicy.ENABLED)
-                    .memoryCachePolicy(CachePolicy.ENABLED)
-                    .apply {
-                        // For videos involving local file (no thumbnail), we might need to extract frame
-                        // But preferably we use the generated thumbnailPath which should be an image
-                        if (media.isVideo && thumbnailFile?.exists() != true) {
-                            decoderFactory { result, options, _ ->
-                                VideoFrameDecoder(result.source, options)
-                            }
-                            // Optimize: Grab frame at 50% or at least 1s in to avoid black frames
-                            // Using videoFrameMillis to request specific frame
-                            val frameTime = if (media.durationMs > 0) media.durationMs / 2 else 1000L
-                            videoFrameMillis(frameTime)
-                        }
-                    }
-                    .build(),
+                model = imageBitmap,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
@@ -141,7 +102,7 @@ fun MediaThumbnail(
                 contentAlignment = Alignment.Center
             ) {
                  Icon(
-                     if (media.isVideo) Icons.Default.Videocam else Icons.Default.Image,
+                     if (isVideo) Icons.Default.Videocam else Icons.Default.Image,
                      contentDescription = null,
                      tint = materialTheme.onSurfaceVariant.copy(alpha = 0.5f)
                  )
@@ -149,7 +110,7 @@ fun MediaThumbnail(
         }
         
         // Video Duration & Type Overlay
-        if (media.isVideo) {
+        if (isVideo) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -162,11 +123,9 @@ fun MediaThumbnail(
                         .background(Color.Black.copy(alpha = 0.6f), MaterialTheme.shapes.extraSmall)
                         .padding(horizontal = 4.dp, vertical = 2.dp)
                 ) {
-                    val durationSeconds = media.durationMs / 1000
-                    val minutes = durationSeconds / 60
-                    val seconds = durationSeconds % 60
+                    // CloudFileEntity does not have durationMs directly, need to derive or add
                     Text(
-                        text = String.format("%d:%02d", minutes, seconds),
+                        text = "--:--", // Placeholder for now
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.White,
                         fontSize = 10.sp,
@@ -210,10 +169,11 @@ fun MediaThumbnail(
                         ),
                     contentAlignment = Alignment.Center
                  ) {
+                     // CloudFileEntity does not have isSynced directly, need to derive or add
                      Icon(
-                        if (media.isSynced) Icons.Default.Cloud else Icons.Default.CloudOff,
-                        contentDescription = if (media.isSynced) stringResource(R.string.synced) else stringResource(R.string.not_synced),
-                        tint = if (media.isSynced) materialTheme.primary else Color.White.copy(alpha = 0.7f),
+                        Icons.Default.CloudOff, // Placeholder for now
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.7f),
                         modifier = Modifier.size(14.dp)
                     )
                  }

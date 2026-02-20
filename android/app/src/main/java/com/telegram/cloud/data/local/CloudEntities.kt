@@ -13,7 +13,14 @@ import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
-@Entity(tableName = "cloud_files")
+@Entity(
+    tableName = "cloud_files",
+    indices = [
+        androidx.room.Index(value = ["uploaded_at"]),
+        androidx.room.Index(value = ["file_name"]),
+        androidx.room.Index(value = ["size_bytes"])
+    ]
+)
 data class CloudFileEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     @ColumnInfo(name = "telegram_message_id") val telegramMessageId: Long,
@@ -68,25 +75,56 @@ enum class DownloadStatus { QUEUED, RUNNING, FAILED, COMPLETED }
 interface CloudFileDao {
     @Query("SELECT * FROM cloud_files ORDER BY uploaded_at DESC")
     fun observeFiles(): Flow<List<CloudFileEntity>>
-    
+
     @Query("SELECT * FROM cloud_files ORDER BY uploaded_at DESC")
     suspend fun getAllFiles(): List<CloudFileEntity>
 
+    // New paged query for CloudFilePagingSource
+    @Query("SELECT * FROM cloud_files ORDER BY CASE :sortBy WHEN 'DATE_MODIFIED' THEN uploaded_at WHEN 'DATE_UPLOADED' THEN uploaded_at WHEN 'FILE_NAME' THEN file_name WHEN 'FILE_SIZE' THEN size_bytes ELSE uploaded_at END COLLATE NOCASE :sortOrder LIMIT :limit OFFSET :offset")
+    suspend fun getFilesPaged(
+        limit: Int,
+        offset: Int,
+        sortBy: String,
+        sortOrder: String
+    ): List<CloudFileEntity>
+
+    // New paged search query for CloudFilePagingSource
+    @Query("SELECT * FROM cloud_files WHERE file_name LIKE :query OR caption LIKE :query ORDER BY CASE :sortBy WHEN 'DATE_MODIFIED' THEN uploaded_at WHEN 'DATE_UPLOADED' THEN uploaded_at WHEN 'FILE_NAME' THEN file_name WHEN 'FILE_SIZE' THEN size_bytes ELSE uploaded_at END COLLATE NOCASE :sortOrder LIMIT :limit OFFSET :offset")
+    suspend fun searchFilesPaged(
+        query: String,
+        limit: Int,
+        offset: Int,
+        sortBy: String,
+        sortOrder: String
+    ): List<CloudFileEntity>
+
     @Query("SELECT * FROM cloud_files WHERE id = :id")
     suspend fun getById(id: Long): CloudFileEntity?
-    
+
     @Query("SELECT * FROM cloud_files WHERE telegram_message_id = :messageId LIMIT 1")
     suspend fun getByTelegramMessageId(messageId: Long): CloudFileEntity?
-    
+
     @Query("SELECT * FROM cloud_files WHERE file_id = :fileId LIMIT 1")
     suspend fun getByFileId(fileId: String): CloudFileEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(file: CloudFileEntity): Long
 
+    @Update(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun update(file: CloudFileEntity)
+
+    @Transaction
+    suspend fun upsert(file: CloudFileEntity) {
+        if (file.id == 0L) { // Assuming 0L indicates a new entry
+            insert(file)
+        } else {
+            update(file)
+        }
+    }
+
     @Query("DELETE FROM cloud_files WHERE id = :id")
     suspend fun deleteById(id: Long)
-    
+
     @Query("DELETE FROM cloud_files WHERE telegram_message_id = :messageId")
     suspend fun deleteByTelegramMessageId(messageId: Long)
 

@@ -201,6 +201,17 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.4.1")
+    
+    // Performance monitoring and profiling
+    debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
+    implementation("androidx.lifecycle:lifecycle-process:2.8.2")
+    
+    // Paging 3 for efficient list loading
+    implementation("androidx.paging:paging-runtime-ktx:3.3.2")
+    implementation("androidx.paging:paging-compose:3.3.2")
+    
+    // Performance measurement
+    implementation("androidx.metrics:metrics-performance:1.0.0-alpha01")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
